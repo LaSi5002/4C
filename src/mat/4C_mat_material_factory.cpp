@@ -149,6 +149,7 @@
 #include "4C_mat_viscoelasthyper.hpp"
 #include "4C_mat_visconeohooke.hpp"
 #include "4C_mat_viscoplastic_no_yield_surface.hpp"
+#include "4C_mat_vplast_anand.hpp"
 #include "4C_mat_vplast_reform_johnsoncook.hpp"
 #include "4C_material_parameter_base.hpp"
 #include "4C_mixture_constituent_elasthyper.hpp"
@@ -610,6 +611,10 @@ std::unique_ptr<Core::Mat::PAR::Parameter> Mat::make_parameter(
     {
       return make_parameter_impl<Mat::Viscoplastic::PAR::ReformulatedJohnsonCook>(
           id, type, input_data);
+    }
+    case Core::Materials::mvl_Anand:
+    {
+      return make_parameter_impl<Mat::Viscoplastic::PAR::Anand>(id, type, input_data);
     }
     case Core::Materials::mix_rule_function:
     {

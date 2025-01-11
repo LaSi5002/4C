@@ -7,7 +7,7 @@ TITLE:
   - "Reformulated Johnson-Cook law, as shown in:"
   - "Mareau: A thermodynamically consistent formulation of the Johnson-Cook"
   - "model, Mechanics of Materials 143, 2020"
-  - "- time integration of internal variables using logarithmic substepping, as shown in:"
+  - "- time integration of internal variables using standard substepping, as shown in:"
   - "Ana: Continuum Modeling and Calibration of Viscoplasticity in the Context"
   - "of the Lithium Anode in Solid-State Batteries"
   - "(Master's Thesis, Institute for Computational Mechanics, TU Munich, 2024)"
@@ -52,9 +52,9 @@ MATERIALS:
       YIELD_COND_A: 1
       YIELD_COND_B: 2
       YIELD_COND_F: 2.5
-      ANISOTROPY: "transvisotrop"
-      LOG_SUBSTEP: true
-      MAX_HALVE_NUM_SUBSTEP: 10
+      MAT_BEHAVIOR: transv_isotrop
+      TIME_INTEGRATION_HIST_VARS: standard
+      MAX_SUBSTEPPING_HALVE_NUM: 1
   - MAT: 4
     MAT_ViscoplasticLawReformulatedJohnsonCook:
       STRAIN_RATE_PREFAC: 1
@@ -85,25 +85,25 @@ RESULT DESCRIPTION:
       DIS: "structure"
       NODE: 4
       QUANTITY: "dispy"
-      VALUE: -0.0042703014498665145
+      VALUE: -0.0042703010027188995
       TOLERANCE: 4.3e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 5
       QUANTITY: "dispx"
-      VALUE: -0.0042703014498690454
+      VALUE: -0.004270301002717856
       TOLERANCE: 4.3e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 8
       QUANTITY: "dispx"
-      VALUE: -0.004270301449868496
+      VALUE: -0.0042703010027182265
       TOLERANCE: 4.3e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 8
       QUANTITY: "dispy"
-      VALUE: -0.004270301449871235
+      VALUE: -0.0042703010027176835
       TOLERANCE: 4.3e-11
   - STRUCTURE:
       DIS: "structure"
@@ -115,19 +115,19 @@ RESULT DESCRIPTION:
       DIS: "structure"
       NODE: 6
       QUANTITY: "dispx"
-      VALUE: -0.0042703014498694635
+      VALUE: -0.004270301002718069
       TOLERANCE: 4.3e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 4
       QUANTITY: "stress_zz"
-      VALUE: 686.9280604644466
+      VALUE: 686.9284981623459
       TOLERANCE: 0.00069
   - STRUCTURE:
       DIS: "structure"
       NODE: 8
       QUANTITY: "stress_zz"
-      VALUE: 686.9280604651651
+      VALUE: 686.9284981618437
       TOLERANCE: 0.00069
 DESIGN POINT DIRICH CONDITIONS:
   - E: 1

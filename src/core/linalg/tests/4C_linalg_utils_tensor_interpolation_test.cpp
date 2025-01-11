@@ -10,6 +10,7 @@
 #include "4C_linalg_utils_tensor_interpolation.hpp"
 
 #include "4C_linalg_fixedsizematrix.hpp"
+#include "4C_linalg_utils_densematrix_eigen.hpp"
 #include "4C_linalg_utils_scalar_interpolation.hpp"
 #include "4C_unittest_utils_assertions_test.hpp"
 #include "4C_utils_exceptions.hpp"

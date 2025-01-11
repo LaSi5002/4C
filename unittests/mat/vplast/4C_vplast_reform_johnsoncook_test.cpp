@@ -9,6 +9,7 @@
 
 #include "4C_global_data.hpp"
 #include "4C_linalg_fixedsizematrix.hpp"
+#include "4C_mat_inelastic_defgrad_factors.hpp"
 #include "4C_mat_material_factory.hpp"
 #include "4C_mat_vplast_law.hpp"
 #include "4C_mat_vplast_reform_johnsoncook.hpp"
@@ -37,6 +38,9 @@ namespace
       vplast_law_reformulated_JC_data.add("INIT_YIELD_STRENGTH", 792.0);
       vplast_law_reformulated_JC_data.add("ISOTROP_HARDEN_PREFAC", 510.0);
       vplast_law_reformulated_JC_data.add("ISOTROP_HARDEN_EXP", 0.26);
+      vplast_law_reformulated_JC_data.add("REF_TEMPERATURE", 293.0);
+      vplast_law_reformulated_JC_data.add("MELT_TEMPERATURE", 1793.0);
+      vplast_law_reformulated_JC_data.add("TEMPERATURE_SENS", 1.03);
       params_vplast_law_reformulated_JC_ =
           std::dynamic_pointer_cast<Mat::Viscoplastic::PAR::ReformulatedJohnsonCook>(
               std::shared_ptr(Mat::make_parameter(1,
@@ -49,8 +53,14 @@ namespace
       int numgp = 8;  // HEX8 element, although not really relevant for the tested methods
       vplast_law_reformulated_JC_->setup(numgp, {}, {});
 
+      // parameter list
+      Teuchos::ParameterList param_list{};
+      // TODO: test with other temperatures!
+      param_list.set<double>("temperature", 293);
+
+
       // call pre_evaluate
-      vplast_law_reformulated_JC_->pre_evaluate(0);
+      vplast_law_reformulated_JC_->pre_evaluate(param_list, 0, 0);
     }
 
     // equivalent stress
@@ -91,16 +101,16 @@ namespace
     // set reference solution
     plastic_strain_rate_reformulated_JC_solution_ = 23188.7161986626;
 
-    // declare error status and logarithmic substepping
-    Mat::ViscoplastErrorType err_status = Mat::ViscoplastErrorType::NoErrors;
-    const bool log_substep = true;
+    // declare error status
+    Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType err_status =
+        Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors;
 
     // compute solution from the viscoplasticity law
     double plastic_strain_rate_reformulated_JC =
         vplast_law_reformulated_JC_->evaluate_plastic_strain_rate(
-            equiv_stress_, equiv_plastic_strain_, 1.0, log_substep, err_status, false);
+            equiv_stress_, equiv_plastic_strain_, 1.0, 1.0e30, err_status, false);
 
-    if (err_status != Mat::ViscoplastErrorType::NoErrors)
+    if (err_status != Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors)
       FOUR_C_THROW("Error encountered during testing of TestEvaluatePlasticStrainRate");
 
 
@@ -116,16 +126,16 @@ namespace
     deriv_plastic_strain_rate_reformulated_JC_solution_(1, 0) = -47431778.9968811;
 
 
-    // declare error status and logarithmic substepping
-    Mat::ViscoplastErrorType err_status = Mat::ViscoplastErrorType::NoErrors;
-    const bool log_substep = true;
+    // declare error status
+    Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType err_status =
+        Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors;
 
     // compute solution from the viscoplasticity law
     Core::LinAlg::Matrix<2, 1> deriv_plastic_strain_rate_reformulated_JC =
         vplast_law_reformulated_JC_->evaluate_derivatives_of_plastic_strain_rate(
-            equiv_stress_, equiv_plastic_strain_, 1.0, log_substep, err_status, false);
+            equiv_stress_, equiv_plastic_strain_, 1.0, 1.0e30, err_status, false);
 
-    if (err_status != Mat::ViscoplastErrorType::NoErrors)
+    if (err_status != Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors)
       FOUR_C_THROW("Error encountered during testing of TestEvaluatePlasticStrainRateDerivatives");
 
     // compare solutions

@@ -16,240 +16,13 @@
 #include "4C_utils_exceptions.hpp"
 #include "4C_utils_fad.hpp"
 
+#include <iomanip>
+#include <utility>
+
 FOUR_C_NAMESPACE_OPEN
 
 namespace
 {
-  /*!
-   * @brief Order the eigenpairs of a given matrix w.r.t. the eigenpairs of a reference
-   * matrix to yield minimal rotations between corresponding eigenvectors (eigenvalues assumed
-   * to already be sorted from highest to lowest in the eigenpairs)
-   *
-   * @note This ordering procedure is relevant in case of multiple eigenvalues, for which the
-   * eigenpairs have to be ordered properly w.r.t. reference eigenpairs
-   * For further information, refer to:
-   *    -# Satheesh et al., Structure-Preserving Invariant Interpolation Schemes for
-   * Invertible Second-Order Tensors, Int J Number Methods Eng. 2024, 125, 10.1002/nme.7373,
-   * Section 5.1
-   *
-   * @param[in]  ref_eigenpairs  eigenpairs of the reference matrix
-   * @param[in|out]  eigenpairs  eigenpairs to be sorted w.r.t. reference matrix
-   */
-  void order_eigenpairs_wrt_reference(
-      const std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& ref_eigenpairs,
-      std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& eigenpairs)
-  {
-    // auxiliaries
-    Core::LinAlg::Matrix<3, 1> temp3x1(Core::LinAlg::Initialization::zero);
-
-    // loop through reference eigenpairs, determine the corresponding eigenpairs
-    int tensor_ind;
-    Core::LinAlg::Matrix<1, 1> max_scalar_prod;
-    Core::LinAlg::Matrix<1, 1> next_scalar_prod;
-    for (int i = 0; i < 2; ++i)
-    {
-      // set the tensor_ind to the current index, before verifying for multiple eigenvalues
-      tensor_ind = i;
-
-      // determine the current scalar product of the tensor eigenvector and the reference
-      // eigenvector
-      max_scalar_prod.multiply_tn(
-          1.0 / (eigenpairs[tensor_ind].second.norm2() * ref_eigenpairs[i].second.norm2()),
-          eigenpairs[tensor_ind].second, ref_eigenpairs[i].second, 0.0);
-
-      // check for multiple eigenvalues: loop through the next eigenpairs of the considered tensor
-      for (int j = i + 1; j < 3; ++j)
-      {
-        if (std::abs(eigenpairs[j].first - eigenpairs[tensor_ind].first) < 1.0e-8)
-        {
-          // multiple eigenvalue found
-          // now we check whether the absolute value of the scalar product is larger than the
-          // current max_scalar_prod
-
-          // compute this scalar product
-          next_scalar_prod.multiply_tn(
-              1.0 / (eigenpairs[j].second.norm2() * ref_eigenpairs[i].second.norm2()),
-              eigenpairs[j].second, ref_eigenpairs[i].second, 0.0);
-
-          // if the absolute value of the current scalar product is larger: set tensor_ind to
-          // the current index and update the maximum scalar product
-          if (std::abs(next_scalar_prod(0)) > std::abs(max_scalar_prod(0)))
-          {
-            tensor_ind = j;
-
-            // update maximum scalar product
-            max_scalar_prod(0) = next_scalar_prod(0);
-          }
-        }
-      }
-
-      // the correct tensor_ind has been now determined;
-      // now set the sign of the according vector so, as to minimize rotation wrt corresponding
-      // reference matrix eigenvector
-      if (max_scalar_prod(0) < 0.0)
-      {
-        eigenpairs[tensor_ind].second.update(0.0, temp3x1, -1.0);
-      }
-
-      // interchange the EV of i and tensor_ind if they are not the same (no need to interchange the
-      // eigenvalues, as these are the same)
-      if (tensor_ind != i)
-      {
-        temp3x1.update(1.0, eigenpairs[i].second, 0.0);        // save EV at index i
-        eigenpairs[i].second = eigenpairs[tensor_ind].second;  // interchange EV
-        eigenpairs[tensor_ind].second = temp3x1;
-      }
-    }
-
-    // the last eigenvector is determined based on the first two to yield
-    // det(...) = 1 for the corresponding eigenvector matrix
-    eigenpairs[2].second(0) = eigenpairs[0].second(1) * eigenpairs[1].second(2) -
-                              eigenpairs[0].second(2) * eigenpairs[1].second(1);
-    eigenpairs[2].second(1) = eigenpairs[0].second(2) * eigenpairs[1].second(0) -
-                              eigenpairs[0].second(0) * eigenpairs[1].second(2);
-    eigenpairs[2].second(2) = eigenpairs[0].second(0) * eigenpairs[1].second(1) -
-                              eigenpairs[0].second(1) * eigenpairs[1].second(0);
-  }
-
-
-  /*!
-   * @brief Align the eigenpairs of the base matrix (nearest to the interpolation point) in case
-   *  of multiple eigenvalues
-   *
-   *  The eigenpairs of the base matrix are reordered in case of multiple eigenvalues to yield
-   *  minimal rotations w.r.t. the eigenpairs of the other matrices.
-   *  Theoretically, some matrices will be favored in this reordering process, since there are
-   *  max. 6 possible ways to reorder the eigenvectors of the base matrix (for a triple
-   * eigenvalue). The following criteria determine the reordering result (priority: 1-> highest):
-   *  1. Distance of the location point (the matrix whose location lies nearest to the base
-   * matrix is favored)
-   *  2. Highest eigenvalue (the matrix with the overall highest eigenvalue is favored in the
-   * reordering process)
-   *
-   * @param[in|out]  spectral_pairs  all spectral pairs (eigenvalue, eigenvector) of all
-   *                                 available matrices used for interpolation
-   * @param[in]  ref_locs  locations \f$ \boldsymbol{x}_j \f$ of the reference matrices
-   * @param[in]  base_ind  index of the base matrix within spectral_pairs
-   */
-  template <unsigned int loc_dim>
-  void align_eigenpairs_of_base_matrix(
-      std::vector<std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>>& spectral_pairs,
-      const std::vector<Core::LinAlg::Matrix<loc_dim, 1>>& ref_locs, const unsigned int& base_ind)
-  {
-    // difference vector between the locations of matrices and the location of the determined base
-    // matrix
-    Core::LinAlg::Matrix<loc_dim, 1> diff_locs(Core::LinAlg::Initialization::zero);
-
-    // find matrix(or matrices) closest to the basis matrix
-    double min_distance = -1.0;
-    std::vector<unsigned int> closest_matrix_inds;
-
-    // vector of maximum relevant eigenvalues (for which the corresponding base eigenvalues have a
-    // multiplicity higher than 1)
-    std::vector<double> max_eigenval(spectral_pairs.size(), 0.0);
-
-    // eigenvalue multiplicity
-    unsigned int multp = 0;
-
-    // loop through the eigenvalues of the base matrix
-    for (int i = 0; i < 3; ++i)
-    {
-      // for the first eigenvalues: determine matrix closest to the base matrix and set first
-      // eigenvalues as the maximum eigenvalues
-      if (i == 0)
-      {
-        // loop through the matrices
-        for (unsigned int m = 0; m < ref_locs.size(); ++m)
-        {
-          // --> find matrix closest to the base matrix (based on location)
-
-          // skip base matrix
-          if (m == base_ind) continue;
-
-          // compute difference vector
-          diff_locs.update(1.0, ref_locs[m], -1.0, ref_locs[base_ind], 0.0);
-
-          // first matrix (excluding the base matrix) is added as closest in the beginning
-          if (min_distance < 0)
-          {
-            min_distance = diff_locs.norm2();
-            closest_matrix_inds.push_back(m);
-            continue;
-          }
-
-          // new closest matrix found
-          if (min_distance > diff_locs.norm2())
-          {
-            min_distance = diff_locs.norm2();
-            closest_matrix_inds.clear();
-            closest_matrix_inds.push_back(m);
-          }
-
-          // another matrix found with the same minimum distance
-          else if (std::abs(min_distance - diff_locs.norm2()) <
-                   1.0e-10 * (std::abs(min_distance) + std::abs(diff_locs.norm2())))
-          {
-            closest_matrix_inds.push_back(m);
-          }
-
-          // --> set first eigenvalues as the maximum eigenvalues initially
-          max_eigenval[m] = spectral_pairs[m][0].first;
-        }
-        multp = 1;
-        continue;
-      }
-
-      // if the current eigenvalue corresponds to the last one
-      if (std::abs(spectral_pairs[base_ind][i].first - spectral_pairs[base_ind][i - 1].first) <
-          1.0e-8)
-      {
-        // increment multiplicity
-        multp += 1;
-
-        // for each of the matrices: get maximum eigenvalue, accounting also for the currently saved
-        // value
-        std::transform(spectral_pairs.begin(), spectral_pairs.end(), max_eigenval.begin(),
-            max_eigenval.begin(),
-            [i](const std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& arr,
-                double curr_val) { return std::max(arr[i].first, curr_val); });
-        continue;
-      }
-
-      // if we encounter a new eigenvalue
-      if (multp == 1)
-      {
-        // set maximum eigenvalues to the current eigenvalues
-        std::transform(spectral_pairs.begin(), spectral_pairs.end(), max_eigenval.begin(),
-            [i](const std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& arr)
-            { return arr[i].first; });
-        continue;
-      }
-      // else we are finished, there are maximum three eigenvalues
-      break;
-    }
-
-    // for multiple eigenvalues: reorder the eigenpairs of the base matrix with respect to the
-    // favored matrix
-    if (multp > 1)
-    {
-      // index of the favored matrix
-      unsigned int ind_fav_matrix;
-
-      // vector containing the eigenvalues of the closest matrices (w.r.t. base matrix)
-      std::vector<unsigned int> eigenval_closest_matrix_inds(closest_matrix_inds.size());
-      std::transform(closest_matrix_inds.begin(), closest_matrix_inds.end(),
-          eigenval_closest_matrix_inds.begin(),
-          [max_eigenval](int index) { return max_eigenval[index]; });
-
-      // get index of the favored matrix
-      ind_fav_matrix = closest_matrix_inds[std::distance(eigenval_closest_matrix_inds.begin(),
-          std::max_element(
-              eigenval_closest_matrix_inds.begin(), eigenval_closest_matrix_inds.end()))];
-
-      // align eigenpairs of the base matrix with its reference (favored matrix)
-      order_eigenpairs_wrt_reference(spectral_pairs[ind_fav_matrix], spectral_pairs[base_ind]);
-    }
-  }
 }  // namespace
 
 
@@ -969,6 +742,241 @@ Core::LinAlg::SecondOrderTensorInterpolator<1>::get_interpolation_gradient(
   // call the general constructor with the matrix expressions
   return get_interpolation_gradient(
       ref_matrices, converted_ref_locs, converted_interp_loc, err_type, perturbation_factor);
+}
+
+
+/*!
+ * @brief Order the eigenpairs of a given matrix w.r.t. the eigenpairs of a reference
+ * matrix to yield minimal rotations between corresponding eigenvectors (eigenvalues assumed
+ * to already be sorted from highest to lowest in the eigenpairs)
+ *
+ * @note This ordering procedure is relevant in case of multiple eigenvalues, for which the
+ * eigenpairs have to be ordered properly w.r.t. reference eigenpairs
+ * For further information, refer to:
+ *    -# Satheesh et al., Structure-Preserving Invariant Interpolation Schemes for
+ * Invertible Second-Order Tensors, Int J Number Methods Eng. 2024, 125, 10.1002/nme.7373,
+ * Section 5.1
+ *
+ * @param[in]  ref_eigenpairs  eigenpairs of the reference matrix
+ * @param[in|out]  eigenpairs  eigenpairs to be sorted w.r.t. reference matrix
+ */
+void Core::LinAlg::order_eigenpairs_wrt_reference(
+    const std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& ref_eigenpairs,
+    std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& eigenpairs)
+{
+  // auxiliaries
+  Core::LinAlg::Matrix<3, 1> temp3x1(Core::LinAlg::Initialization::zero);
+
+  // loop through reference eigenpairs, determine the corresponding eigenpairs
+  int tensor_ind;
+  Core::LinAlg::Matrix<1, 1> max_scalar_prod;
+  Core::LinAlg::Matrix<1, 1> next_scalar_prod;
+  for (int i = 0; i < 2; ++i)
+  {
+    // set the tensor index to the current index, before verifying for multiple eigenvalues
+    tensor_ind = i;
+
+    // determine the current scalar product of the tensor eigenvector and the reference
+    // eigenvector
+    max_scalar_prod.multiply_tn(
+        1.0 / (eigenpairs[tensor_ind].second.norm2() * ref_eigenpairs[i].second.norm2()),
+        eigenpairs[tensor_ind].second, ref_eigenpairs[i].second, 0.0);
+
+
+    // check for multiple eigenvalues: loop through the next eigenpairs of the considered tensor
+    for (int j = i + 1; j < 3; ++j)
+    {
+      if (std::abs(eigenpairs[j].first - eigenpairs[tensor_ind].first) < 1.0e-12)
+      {
+        // multiple eigenvalue found
+        // now we check whether the absolute value of the scalar product is larger than the
+        // current max_scalar_prod
+
+        // compute this scalar product
+        next_scalar_prod.multiply_tn(
+            1.0 / (eigenpairs[j].second.norm2() * ref_eigenpairs[i].second.norm2()),
+            eigenpairs[j].second, ref_eigenpairs[i].second, 0.0);
+
+
+        // if the absolute value of the current scalar product is larger: set tensor_ind to
+        // the current index and update the maximum scalar product
+        if (std::abs(next_scalar_prod(0)) > std::abs(max_scalar_prod(0)))
+        {
+          tensor_ind = j;
+
+          // update maximum scalar product
+          max_scalar_prod(0) = next_scalar_prod(0);
+        }
+      }
+    }
+
+    // the correct tensor_ind has been now determined;
+    // now set the sign of the according vector so, as to minimize rotation wrt corresponding
+    // reference matrix eigenvector
+    if (max_scalar_prod(0) < 0.0)
+    {
+      eigenpairs[tensor_ind].second.update(0.0, temp3x1, -1.0);
+    }
+
+    // interchange the EV of i and tensor_ind if they are not the same (no need to interchange the
+    // eigenvalues, as these are the same)
+    if (tensor_ind != i)
+    {
+      temp3x1.update(1.0, eigenpairs[i].second, 0.0);        // save EV at index i
+      eigenpairs[i].second = eigenpairs[tensor_ind].second;  // interchange EV
+      eigenpairs[tensor_ind].second = temp3x1;
+    }
+  }
+
+  // the last eigenvector is determined based on the first two to yield
+  // det(...) = 1 for the corresponding eigenvector matrix
+  eigenpairs[2].second(0) = eigenpairs[0].second(1) * eigenpairs[1].second(2) -
+                            eigenpairs[0].second(2) * eigenpairs[1].second(1);
+  eigenpairs[2].second(1) = eigenpairs[0].second(2) * eigenpairs[1].second(0) -
+                            eigenpairs[0].second(0) * eigenpairs[1].second(2);
+  eigenpairs[2].second(2) = eigenpairs[0].second(0) * eigenpairs[1].second(1) -
+                            eigenpairs[0].second(1) * eigenpairs[1].second(0);
+}
+
+
+
+/*!
+ * @brief Align the eigenpairs of the base matrix (nearest to the interpolation point) in case
+ *  of multiple eigenvalues
+ *
+ *  The eigenpairs of the base matrix are reordered in case of multiple eigenvalues to yield
+ *  minimal rotations w.r.t. the eigenpairs of the other matrices.
+ *  Theoretically, some matrices will be favored in this reordering process, since there are
+ *  max. 6 possible ways to reorder the eigenvectors of the base matrix (for a triple
+ * eigenvalue). The following criteria determine the reordering result (priority: 1-> highest):
+ *  1. Distance of the location point (the matrix whose location lies nearest to the base
+ * matrix is favored)
+ *  2. Highest eigenvalue (the matrix with the overall highest eigenvalue is favored in the
+ * reordering process)
+ *
+ * @param[in|out]  spectral_pairs  all spectral pairs (eigenvalue, eigenvector) of all
+ *                                 available matrices used for interpolation
+ * @param[in]  ref_locs  locations \f$ \boldsymbol{x}_j \f$ of the reference matrices
+ * @param[in]  base_ind  index of the base matrix within spectral_pairs
+ */
+template <unsigned int loc_dim>
+void Core::LinAlg::align_eigenpairs_of_base_matrix(
+    std::vector<std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>>& spectral_pairs,
+    const std::vector<Core::LinAlg::Matrix<loc_dim, 1>>& ref_locs, const unsigned int& base_ind)
+{
+  // difference vector between the locations of matrices and the location of the determined base
+  // matrix
+  Core::LinAlg::Matrix<loc_dim, 1> diff_locs(Core::LinAlg::Initialization::zero);
+
+  // find matrix(or matrices) closest to the basis matrix
+  double min_distance = -1.0;
+  std::vector<unsigned int> closest_matrix_inds;
+
+  // vector of maximum relevant eigenvalues (for which the corresponding base eigenvalues have a
+  // multiplicity higher than 1)
+  std::vector<double> max_eigenval(spectral_pairs.size(), 0.0);
+
+  // eigenvalue multiplicity
+  unsigned int multp = 0;
+
+  // loop through the eigenvalues of the base matrix
+  for (int i = 0; i < 3; ++i)
+  {
+    // for the first eigenvalues: determine matrix closest to the base matrix and set first
+    // eigenvalues as the maximum eigenvalues
+    if (i == 0)
+    {
+      // loop through the matrices
+      for (unsigned int m = 0; m < ref_locs.size(); ++m)
+      {
+        // --> find matrix closest to the base matrix (based on location)
+
+        // skip base matrix
+        if (m == base_ind) continue;
+
+        // compute difference vector
+        diff_locs.update(1.0, ref_locs[m], -1.0, ref_locs[base_ind], 0.0);
+
+        // first matrix (excluding the base matrix) is added as closest in the beginning
+        if (min_distance < 0)
+        {
+          min_distance = diff_locs.norm2();
+          closest_matrix_inds.push_back(m);
+          continue;
+        }
+
+        // new closest matrix found
+        if (min_distance > diff_locs.norm2())
+        {
+          min_distance = diff_locs.norm2();
+          closest_matrix_inds.clear();
+          closest_matrix_inds.push_back(m);
+        }
+
+        // another matrix found with the same minimum distance
+        else if (std::abs(min_distance - diff_locs.norm2()) <
+                 1.0e-10 * (std::abs(min_distance) + std::abs(diff_locs.norm2())))
+        {
+          closest_matrix_inds.push_back(m);
+        }
+
+        // --> set first eigenvalues as the maximum eigenvalues initially
+        max_eigenval[m] = spectral_pairs[m][0].first;
+      }
+      multp = 1;
+      continue;
+    }
+
+    // if the current eigenvalue corresponds to the last one
+    if (std::abs(spectral_pairs[base_ind][i].first - spectral_pairs[base_ind][i - 1].first) <
+        1.0e-12)
+    {
+      // increment multiplicity
+      multp += 1;
+
+      // for each of the matrices: get maximum eigenvalue, accounting also for the currently saved
+      // value
+      std::transform(spectral_pairs.begin(), spectral_pairs.end(), max_eigenval.begin(),
+          max_eigenval.begin(),
+          [i](const std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& arr,
+              double curr_val) { return std::max(arr[i].first, curr_val); });
+      continue;
+    }
+
+    // if we encounter a new eigenvalue
+    if (multp == 1)
+    {
+      // set maximum eigenvalues to the current eigenvalues
+      std::transform(spectral_pairs.begin(), spectral_pairs.end(), max_eigenval.begin(),
+          [i](const std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>& arr)
+          { return arr[i].first; });
+      continue;
+    }
+    // else we are finished, there are maximum three eigenvalues
+    break;
+  }
+
+  // for multiple eigenvalues: reorder the eigenpairs of the base matrix with respect to the
+  // favored matrix
+  if (multp > 1)
+  {
+    // index of the favored matrix
+    unsigned int ind_fav_matrix;
+
+    // vector containing the eigenvalues of the closest matrices (w.r.t. base matrix)
+    std::vector<unsigned int> eigenval_closest_matrix_inds(closest_matrix_inds.size());
+    std::transform(closest_matrix_inds.begin(), closest_matrix_inds.end(),
+        eigenval_closest_matrix_inds.begin(),
+        [max_eigenval](int index) { return max_eigenval[index]; });
+
+    // get index of the favored matrix
+    ind_fav_matrix = closest_matrix_inds[std::distance(
+        eigenval_closest_matrix_inds.begin(), std::max_element(eigenval_closest_matrix_inds.begin(),
+                                                  eigenval_closest_matrix_inds.end()))];
+
+    // align eigenpairs of the base matrix with its reference (favored matrix)
+    order_eigenpairs_wrt_reference(spectral_pairs[ind_fav_matrix], spectral_pairs[base_ind]);
+  }
 }
 
 

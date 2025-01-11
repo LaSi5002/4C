@@ -1385,7 +1385,7 @@ void Discret::Elements::TemperImpl<distype>::nonlinear_thermo_disp_contribution(
       // (8x1)   (8x3) (3x1)
       efint->multiply_tn(fac_, derxy_, heatflux_, 1.0);
 
-#ifndef TSISLMNOGOUGHJOULE
+
       // fint_{Td} = - N^T . ctemp : (1/2 . C') . N . T
       //              (1x8)  (6x1)       (6x1)(8x1)(8x1)
       //              (1x8)        (1x1)        (1x1)
@@ -1401,7 +1401,6 @@ void Discret::Elements::TemperImpl<distype>::nonlinear_thermo_disp_contribution(
       }
       else
         efint->multiply((-fac_ * ctempCdot), funct_, NT, 1.0);
-#endif
       // efint += H_p term is added to fint within material call
 
     }  // (efint != nullptr)
@@ -1431,7 +1430,6 @@ void Discret::Elements::TemperImpl<distype>::nonlinear_thermo_disp_contribution(
       Core::LinAlg::Matrix<nsd_, nen_> CinvdCmatGradTN(Core::LinAlg::Initialization::uninitialized);
       CinvdCmatGradTN.multiply_nt(CinvdCmatGradT, funct_);
       econd->multiply_tn(fac_, derxy_, CinvdCmatGradTN, 1.0);  //(8x8)=(8x3)(3x8)
-#ifndef TSISLMNOGOUGHJOULE
       // linearization of thermo-mechanical effects
       if (structmat->material_type() == Core::Materials::m_plelasthyper)
       {
@@ -1445,7 +1443,6 @@ void Discret::Elements::TemperImpl<distype>::nonlinear_thermo_disp_contribution(
       }
       else
         econd->multiply_nt((-fac_ * ctempCdot), funct_, funct_, 1.0);
-#endif
       // be aware: special terms of materials are added within material call
     }  // (econd != nullptr)
 

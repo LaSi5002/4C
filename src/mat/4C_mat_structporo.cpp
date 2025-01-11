@@ -15,6 +15,7 @@
 #include "4C_mat_poro_law.hpp"
 #include "4C_mat_so3_material.hpp"
 #include "4C_utils_enum.hpp"
+#include "4C_utils_exceptions.hpp"
 
 #include <vector>
 
@@ -105,6 +106,7 @@ Mat::StructPoro::StructPoro(Mat::PAR::StructPoro* params)
     : params_(params), porosity_(nullptr), surf_porosity_(nullptr), is_initialized_(false)
 {
   mat_ = std::dynamic_pointer_cast<Mat::So3Material>(Mat::factory(params_->matid_));
+
   if (mat_ == nullptr)
     FOUR_C_THROW("Mat::StructPoro: underlying material should be of type Mat::So3Material");
 }

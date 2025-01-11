@@ -1,0 +1,9 @@
+# 4C output control file
+# created by ana on kolmogorov.lnm.mw.tum.de at Wed Jun  4 11:41:26 2025
+# using code version (git SHA1) 3be403b25f1009e5e6dcd8683e99b73a71ee9acc 
+
+input_file = "tests/input_files/mat_iso_viscoplast_anand_log_timint.dat"
+problem_type = "Structure"
+spatial_approximation = "Polynomial"
+ndim = 3
+

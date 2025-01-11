@@ -16,6 +16,8 @@
 #include "4C_utils_exceptions.hpp"
 #include "4C_utils_parameter_list.fwd.hpp"
 
+#include <magic_enum/magic_enum_iostream.hpp>
+
 #include <algorithm>
 #include <any>
 #include <functional>
@@ -202,6 +204,7 @@ namespace Core::IO
 
 namespace Core::IO::Internal::InputParameterContainerImplementation
 {
+
   template <typename T>
   const T* try_get_any_data(const std::string& name, const std::any& data)
   {

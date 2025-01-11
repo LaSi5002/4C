@@ -10,21 +10,35 @@
 
 #include "4C_config.hpp"
 
+#include "4C_comm_pack_buffer.hpp"
+#include "4C_comm_pack_helpers.hpp"
 #include "4C_linalg_fixedsizematrix.hpp"
+#include "4C_linalg_utils_densematrix_funct.hpp"
 #include "4C_linalg_utils_tensor_interpolation.hpp"
 #include "4C_mat_elast_couptransverselyisotropic.hpp"
+#include "4C_mat_inelastic_defgrad_factors_service.hpp"
 #include "4C_mat_multiplicative_split_defgrad_elasthyper.hpp"
+#include "4C_mat_so3_material.hpp"
 #include "4C_mat_vplast_law.hpp"
 #include "4C_material_parameter_base.hpp"
+#include "4C_utils_enum.hpp"
 #include "4C_utils_exceptions.hpp"
 #include "4C_utils_parameter_list.fwd.hpp"
 
+#include <boost/graph/visitors.hpp>
+#include <Teuchos_Array.hpp>
 #include <Teuchos_ParameterList.hpp>
 
+#include <array>
+#include <cmath>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
+
 FOUR_C_NAMESPACE_OPEN
+
 
 namespace Discret::Utils
 {
@@ -33,6 +47,8 @@ namespace Discret::Utils
 
 namespace Mat
 {
+  using namespace InelasticDefgradTransvIsotropElastViscoplastUtils;
+
   namespace PAR
   {
     enum class InelasticSource;
@@ -314,43 +330,180 @@ namespace Mat
       [[nodiscard]] double yield_cond_b() const { return yield_cond_b_; };
       //! get yield condition parameter \f[ F \f]
       [[nodiscard]] double yield_cond_f() const { return yield_cond_f_; };
-      //! get boolean: transversely isotropic material? (true: yes, false: isotropic)
-      [[nodiscard]] bool bool_transv_isotropy() const { return bool_transv_isotropy_; };
-      //! get boolean: logarithmic substepping? (true: yes, false: standard substepping)
-      [[nodiscard]] bool bool_log_substepping() const { return bool_log_substepping_; };
+      //! get material behavior
+      [[nodiscard]] MatBehavior mat_behavior() const { return mat_behavior_; };
+      //! get boolean: should Local Newton Guess Interpolation be used?
+      [[nodiscard]] bool use_lngi() const { return use_lngi_; };
+      //! get type of eigenvalue assignment for the elastic stretch within the plastic predictor
+      [[nodiscard]] LocalNewtonGuessInterpolation::PlasticPredictorElasticStretchEigenvalType
+      lngi_plastic_pred_elastic_stretch_eigenval_type() const
+      {
+        return lngi_plastic_pred_elastic_stretch_eigenval_type_;
+      };
+      //! get type of eigenvector rotation assignment for the elastic stretch within the plastic
+      //! predictor
+      [[nodiscard]] LocalNewtonGuessInterpolation::PlasticPredictorElasticStretchEigenvectRotType
+      lngi_plastic_pred_elastic_stretch_eigenvect_rot_type() const
+      {
+        return lngi_plastic_pred_elastic_stretch_eigenvect_rot_type_;
+      };
+      //! get type of rotation assignment within the plastic
+      //! predictor
+      [[nodiscard]] LocalNewtonGuessInterpolation::PlasticPredictorRotationType
+      lngi_plastic_pred_rot_type() const
+      {
+        return lngi_plastic_pred_rot_type_;
+      };
+      //! get boolean: check consistency of the matrices and their
+      //! components determined and analyzed during Local Newton Guess Interpolation? (true: yes,
+      //! false: no)
+      [[nodiscard]] bool lngi_check_consistency() const { return lngi_check_consistency_; };
+      //! get boolean: precondition matrices for the Local Newton Guess Interpolation, i.e., set
+      //! components smaller than a set numerical tolerance to 0? (true: yes, false: no)
+      [[nodiscard]] bool lngi_precondition_matrices() const { return lngi_precondition_matrices_; };
+      //! get numerical tolerance used to precondition matrices for the Local Newton Guess
+      //! Interpolation, i.e., set components smaller than (numerical tolerance * 2-norm of input
+      //! matrix) to 0?
+      [[nodiscard]] double lngi_precondition_matrices_num_tol() const
+      {
+        return lngi_precondition_matrices_num_tol_;
+      };
+      //! get starting point type for the Local Newton Guess Interpolation
+      [[nodiscard]] LocalNewtonGuessInterpolation::LocalNewtonGuessInterpolationStartingPointType
+      lngi_starting_point_type() const
+      {
+        return lngi_starting_point_type_;
+      };
+      //! get user-specified starting point for Local Newton Guess Interpolation, when using the
+      //! user_set starting point type
+      [[nodiscard]] double lngi_starting_point() const { return lngi_starting_point_; }
+      //! get user-specified interval scanning parameter for the Local
+      // Newton Guess Interpolation
+      [[nodiscard]] double lngi_interval_scan_param() const { return lngi_interval_scan_param_; }
+      //! get maximum number of Local Newton Guess Reinterpolations to be used within a
+      //! single Local Newton Loop
+      [[nodiscard]] int lngi_max_num_reinterp() const { return lngi_max_num_reinterp_; }
+      //! get minimum interpolation interval | xi_upper - xi_lower | (2-norm in
+      //! interpolation space) for the Local Newton Guess Interpolation, for which further
+      //! interpolation is not possible / feasible
+      [[nodiscard]] double lngi_min_interp_interval() const { return lngi_min_interp_interval_; }
+      //! get minimum relative deviation between equivalent stresses related to the current
+      //! interpolation point and its lower bound  | \overline{\xi} -
+      //! \overline{\sigma}(\xi_lower) | / \overline{\sigma}(\xi_lower) for the Local Newton Guess
+      //! Reinterpolation, upon which xi_lower is set as xi in the reinterpolation routine
+      [[nodiscard]] double lngi_reinterp_min_rel_dev() const { return lngi_reinterp_min_rel_dev_; }
+      //! get boolean: output relevant data from each microiteration of the Local Newton Guess
+      //! Interpolation (and Reinterpolations) to a dedicated csv file?
+      [[nodiscard]] bool use_csv_output_lngi_micro_iter()
+      {
+        return use_csv_output_lngi_micro_iter_;
+      }
+
+      //! get boolean:       use steepest descent direction if the Newton
+      //! direction fails in single Local Newton iterations? (true: yes, false: no)
+      [[nodiscard]] bool use_steepest_descent_update_correction() const
+      {
+        return use_steepest_descent_update_correction_;
+      }
+      //! get boolean: use line search to avoid negative plastic strains
+      //! in the Local Newton Loop? (true: yes, false: no)
+      [[nodiscard]] bool use_line_search() const { return use_line_search_; };
+      //! get boolean: check angle condition prior to backtracking line
+      //! search? (true: yes, false: no)
+      [[nodiscard]] bool check_line_search_angle_condition() const
+      {
+        return check_line_search_angle_condition_;
+      };
+      //! tolerance for angle condition prior to backtracking line
+      //! search? (true: yes, false: no)
+      [[nodiscard]] double line_search_angle_condition_tolerance() const
+      {
+        return line_search_angle_condition_tolerance_;
+      };
+      //! get boolean: use substepping in the time integration scheme? (true: yes, false: no)
+      [[nodiscard]] bool use_substepping() const { return use_substepping_; };
+      //! get boolean: analyze time integration scheme and write
+      //! output to csv? (true: yes, false: no)
+      [[nodiscard]] bool analyze_timint() const { return analyze_timint_; };
+      //! get relative timer tolerance (analyze_timint_ = True) for the return mapping evaluation in
+      //! the current timestep
+      [[nodiscard]] double analyze_timint_timer_rel_tol() const
+      {
+        return analyze_timint_timer_rel_tol_;
+      };
       //! get maximum number of times a time step can be halved into smaller and smaller substeps
       [[nodiscard]] unsigned int max_halve_number() const
       {
-        return static_cast<unsigned int>(max_halve_number_);
-      };
-
-
-      //! read anisotropy type (true: transversely-isotropic, false: isotropic)
-      bool read_anisotropy_type(std::string anisotropy_type)
+        return static_cast<unsigned int>(max_substepping_halve_num_);
+      }
+      //! get the type of time integration for the evolution equations
+      //! of history variables
+      [[nodiscard]] TimIntType timint_type() const { return timint_type_; };
+      //! get the type of material linearization used
+      [[nodiscard]] LinearizationType linearization_type() const { return linearization_type_; };
+      //! DEBUG: set linearization type
+      void debug_set_linearization_type(const LinearizationType linearization_type);
+      //! get maximum, numerically evaluable plastic strain increment
+      [[nodiscard]] double max_plastic_strain_incr() const { return max_plastic_strain_incr_; };
+      //! get maximum, numerically evaluable value for the increment of
+      //! the plastic strain derivatives (dt * derivative)
+      [[nodiscard]] double max_plastic_strain_deriv_incr() const
       {
-        // define naming types
-        const std::array<std::string, 3> transv_isotropy_names{
-            "transvisotrop", "transverseisotropic", "transverselyisotropic"};
-        const std::array<std::string, 2> isotropy_names{"isotrop", "isotropic"};
+        return max_plastic_strain_deriv_incr_;
+      }
+      //! get computation method for the matrix exponential
+      [[nodiscard]] Core::LinAlg::MatrixExpCalcMethod mat_exp_calc_method() const
+      {
+        return mat_exp_calc_method_;
+      }
+      //! get computation method for the first derivative of the matrix exponential
+      [[nodiscard]] Core::LinAlg::GenMatrixExpFirstDerivCalcMethod mat_exp_deriv_calc_method() const
+      {
+        return mat_exp_deriv_calc_method_;
+      }
+      //! get computation method for the matrix logarithm
+      [[nodiscard]] Core::LinAlg::MatrixLogCalcMethod mat_log_calc_method() const
+      {
+        return mat_log_calc_method_;
+      }
+      //! get computation method for the first derivative of the matrix logarithm
+      [[nodiscard]] Core::LinAlg::GenMatrixLogFirstDerivCalcMethod mat_log_deriv_calc_method() const
+      {
+        return mat_log_deriv_calc_method_;
+      }
+      //! get boolean: output relevant data from each iteration of the last, failed Local Newton
+      //! loop to a dedicated csv file?
+      [[nodiscard]] bool use_csv_output_failed_local_newton_iter() const
+      {
+        return use_csv_output_failed_local_newton_iter_;
+      }
 
+      //! get boolean: output relevant data from each microiteration of the line
+      //! search algorithm(s) to a dedicated csv file?
+      [[nodiscard]] bool use_csv_output_line_search_micro_iter()
+      {
+        return use_csv_output_line_search_micro_iter_;
+      }
 
-        if (std::find(transv_isotropy_names.begin(), transv_isotropy_names.end(),
-                anisotropy_type) != transv_isotropy_names.end())
-        {
-          return true;
-        }
-        else if (std::find(isotropy_names.begin(), isotropy_names.end(), anisotropy_type) !=
-                 isotropy_names.end())
-        {
-          return false;
-        }
-        else
-        {
-          FOUR_C_THROW(
-              "Given anisotropy type {} not defined for InelasticDefgradTransvIsotropViscoplast",
-              anisotropy_type.c_str());
-        }
-      };
+      //! get convergence tolerance for the Local Newton-Raphson scheme
+      //! (absolute residual value)
+      [[nodiscard]] double local_newton_res_tol() { return local_newton_res_tol_; }
+
+      //! get convergence tolerance for the Local Newton-Raphson scheme
+      //! (2-norm of solution increment)
+      [[nodiscard]] double local_newton_incr_tol() { return local_newton_incr_tol_; }
+
+      //! get convergence check strategy for the Local Newton-Raphson scheme
+      [[nodiscard]] LocalNewtonConvCheck local_newton_conv_check()
+      {
+        return local_newton_conv_check_;
+      }
+
+      //! strategy in case of divergence of the Local Newton-Raphson scheme
+      [[nodiscard]] LocalNewtonDiverCont local_newton_diver_cont()
+      {
+        return local_newton_diver_cont_;
+      }
 
      private:
       //! ID of the viscoplasticity law
@@ -366,16 +519,154 @@ namespace Mat
       //! yield condition parameter \f[ F \f]
       const double yield_cond_f_;
 
-      //! boolean: transversely isotropic? (true: yes, false: isotropic)
-      const bool bool_transv_isotropy_;
+      //! material behavior (transversely isotropic or isotropic)
+      const MatBehavior mat_behavior_;
 
-      //! boolean: computation method --> logarithmic substepping? (true: yes, false: standard
-      //! substepping)
-      const bool bool_log_substepping_;
+      //! computation method for the time integration of the
+      //! history variables
+      const TimIntType timint_type_;
+
+      //! linearization method
+      LinearizationType linearization_type_;
+
+      //! maximum, numerically evaluable plastic strain increment
+      const double max_plastic_strain_incr_;
+
+      //! maximum, numerically evaluable increment of
+      //! plastic strain derivatives (time_step * derivative)
+      const double max_plastic_strain_deriv_incr_;
+
+      //! boolean: use Local Newton Guess Interpolation?
+      const bool use_lngi_;
+
+      //! Local Newton Guess Interpolation: type of elastic stretch eigenvalue assignment within
+      //! plastic predictor
+      const LocalNewtonGuessInterpolation::PlasticPredictorElasticStretchEigenvalType
+          lngi_plastic_pred_elastic_stretch_eigenval_type_;
+
+      //! Local Newton Guess Interpolation: type of eigenvector rotation assignment for the elastic
+      //! stretch within the plastic predictor
+      const LocalNewtonGuessInterpolation::PlasticPredictorElasticStretchEigenvectRotType
+          lngi_plastic_pred_elastic_stretch_eigenvect_rot_type_;
+
+      //! Local Newton Guess Interpolation: type of eigenvector rotation assignment for the elastic
+      //! stretch within the plastic predictor
+      const LocalNewtonGuessInterpolation::PlasticPredictorRotationType lngi_plastic_pred_rot_type_;
+
+      //! Local Newton Guess Interpolation: starting point type
+      //! for the Local Newton Guess Interpolation
+      const LocalNewtonGuessInterpolation::LocalNewtonGuessInterpolationStartingPointType
+          lngi_starting_point_type_;
+
+      //! Local Newton Guess Interpolation: value for the starting
+      // point of the Local Newton Guess Interpolation to be used for the
+      // user_set starting point type.
+      const double lngi_starting_point_;
+
+      //! Local Newton Guess Interpolation: interval scanning parameter $k_\mathrm{scan}$
+      const double lngi_interval_scan_param_;
+
+      //! Local Newton Guess Interpolation: maximum number of Local Newton Guess Reinterpolations
+      //! allowed in a single Local Newton Loop until error is thrown
+      const int lngi_max_num_reinterp_;
+
+      //! Local Newton Guess Interpolation: minimum interpolation interval | xi_upper - xi_lower |
+      //! (2-norm in interpolation space), for which further interpolation is not possible /
+      //! feasible
+      const double lngi_min_interp_interval_;
+
+      //! Local Newton Guess Reinterpolation: get minimum relative deviation between equivalent
+      //! stresses related to the current interpolation point and its lower bound  | \overline{\xi}
+      //! -
+      //! \overline{\sigma}(\xi_lower) | / \overline{\sigma}(\xi_lower) upon which xi_lower is set
+      //! as xi in the reinterpolation routine
+      const double lngi_reinterp_min_rel_dev_;
+
+      //! Local Newton Guess Interpolation: precondition matrices,
+      //! i.e., set components smaller than a set numerical
+      //! tolerance to 0? (true: yes, false: no)
+      const bool lngi_precondition_matrices_;
+
+      //! Local Newton Guess Interpolation: numerical tolerance used to precondition matrices, i.e.,
+      //! set components smaller than (numerical tolerance
+      //! * 2-norm of input matrix) to 0? (true: yes, false: no)
+      const double lngi_precondition_matrices_num_tol_;
+
+      //! Local Newton Guess Interpolation: check consistency of the matrices and their
+      //! components determined and analyzed during the interpolation algorithm? (true: yes, false:
+      //! no)
+      const bool lngi_check_consistency_;
+
+      //! boolean: use steepest descent direction if the Newton
+      //! direction fails in single Local Newton iterations? (true: yes, false: no)
+      const double use_steepest_descent_update_correction_;
+
+      //! boolean: use line search to avoid negative plastic strains in
+      //! the Local Newton Loop? (true: yes, false: no)
+      const bool use_line_search_;
+
+      //! boolean: check angle condition prior to backtracking line
+      //! search algorithm (see Andrei: Modern Numerical Nonlinear
+      //! Optimization, Springer, p. 46-48)
+      const bool check_line_search_angle_condition_;
+
+      //! tolerance for the angle condition prior to backtracking line
+      //! search algorithm (see Andrei: Modern Numerical Nonlinear
+      //! Optimization, Springer, p. 46-48)
+      const double line_search_angle_condition_tolerance_;
+
+      //! boolean: use substepping? (true: yes, false: no)
+      const bool use_substepping_;
+
+      //! boolean: analyze time integration and write output to csv?
+      const bool analyze_timint_;
+
+      //! relative timer tolerance (analyze_timint_ = True) for the return mapping evaluation in the
+      //! current timestep -> return mapping / determination of inelastic defgrad is repeated until
+      //! the computation time changes only within the set relative tolerance
+      const double analyze_timint_timer_rel_tol_;
 
       //! maximum number of times the given time step can be halved before reaching the minimum
       //! allowed substep length
-      const int max_halve_number_;
+      const int max_substepping_halve_num_;
+
+      //! utilized computation method for the matrix exponential
+      const Core::LinAlg::MatrixExpCalcMethod mat_exp_calc_method_;
+
+      //! utilized computation method for the first derivative of the matrix exponential
+      const Core::LinAlg::GenMatrixExpFirstDerivCalcMethod mat_exp_deriv_calc_method_;
+
+      //! utilized computation method for the matrix logarithm
+      const Core::LinAlg::MatrixLogCalcMethod mat_log_calc_method_;
+
+      //! utilized computation method for the first derivative of the matrix logarithm
+      const Core::LinAlg::GenMatrixLogFirstDerivCalcMethod mat_log_deriv_calc_method_;
+
+      //! convergence tolerance for the Local Newton-Raphson scheme
+      //! (absolute residual value)
+      const double local_newton_res_tol_;
+
+      //! convergence tolerance for the Local Newton-Raphson scheme
+      //! (2-norm of solution increment)
+      const double local_newton_incr_tol_;
+
+      //! convergence check strategy for the Local Newton-Raphson scheme
+      const LocalNewtonConvCheck local_newton_conv_check_;
+
+      //! strategy in case of divergence of the Local Newton-Raphson scheme
+      const LocalNewtonDiverCont local_newton_diver_cont_;
+
+      //! output relevant data from each iteration of the last, failed Local Newton
+      //! loop to a dedicated csv file
+      const bool use_csv_output_failed_local_newton_iter_;
+
+      //! output relevant data from each microiteration of the Local Newton Guess Interpolation (and
+      //! Reinterpolations) to a dedicated csv file
+      const bool use_csv_output_lngi_micro_iter_;
+
+      //! output relevant data from each microiteration of the line
+      //! search algorithm(s) to a dedicated csv file
+      const bool use_csv_output_line_search_micro_iter_;
     };
   }  // namespace PAR
 
@@ -603,6 +894,32 @@ namespace Mat
     virtual void pack_inelastic(Core::Communication::PackBuffer& data) const = 0;
 
     virtual void unpack_inelastic(Core::Communication::UnpackBuffer& data) = 0;
+
+    /*!
+     * @brief Register names of the internal data that should be saved during runtime output
+     *
+     * @param[out] name_and_size Unordered map of names of the data with the respective vector size
+     */
+    virtual void register_output_data_names(
+        std::unordered_map<std::string, int>& names_and_size) const
+    {
+    }
+
+    /*!
+     * @brief Evaluate internal data for every Gauss point saved for output during runtime
+     * output
+     *
+     * @param[in] name  Name of the data to export
+     * @param[out] data NUMGPxNUMDATA Matrix holding the data
+     *
+     * @return true if data is set by the material, otherwise false
+     */
+    virtual bool evaluate_output_data(
+        const std::string& name, Core::LinAlg::SerialDenseMatrix& data) const
+    {
+      return false;
+    }
+
 
    private:
     /// material parameters
@@ -1216,115 +1533,6 @@ namespace Mat
   class InelasticDefgradTransvIsotropElastViscoplast : public InelasticDefgradFactors
   {
    public:
-    //! struct containing quantities computed from a given elasticity/plasticity state;
-    //! given: current right Cauchy-Green deformation tensor, inelastic deformation gradient and
-    //! plastic strain
-    struct StateQuantities
-    {
-      // ----- current state quantities (for the evaluated Gauss points) ----- //
-
-      //! elastic right Cauchy-Green deformation tensor
-      Core::LinAlg::Matrix<3, 3> curr_CeM_{Core::LinAlg::Initialization::zero};
-
-      //! isotropic stress factors
-      Core::LinAlg::Matrix<3, 1> curr_gamma_{Core::LinAlg::Initialization::zero};
-
-      //! isotropic constitutive tensor factors
-      Core::LinAlg::Matrix<8, 1> curr_delta_{Core::LinAlg::Initialization::zero};
-
-      //! elastic 2nd PK stress tensors (specifically only transversely-isotropic components)
-      Core::LinAlg::Matrix<3, 3> curr_SeM_{Core::LinAlg::Initialization::zero};
-
-      //! elastic stiffness tensor (specifically only transversely-isotropic components)
-      Core::LinAlg::Matrix<6, 6> curr_dSedCe_{Core::LinAlg::Initialization::zero};
-
-      //! deviatoric, symmetric part of the Mandel stress tensor
-      Core::LinAlg::Matrix<3, 3> curr_Me_dev_sym_M_{Core::LinAlg::Initialization::zero};
-
-      //! equivalent tensile stress
-      double curr_equiv_stress_{0.0};
-
-      //! equivalent plastic strain rate
-      double curr_equiv_plastic_strain_rate_{0.0};
-
-      //! plastic flow direction tensor
-      Core::LinAlg::Matrix<3, 3> curr_NpM_{Core::LinAlg::Initialization::zero};
-
-      //! plastic stretching tensor
-      Core::LinAlg::Matrix<3, 3> curr_dpM_{Core::LinAlg::Initialization::zero};
-
-      //! plastic velocity gradient tensor
-      Core::LinAlg::Matrix<3, 3> curr_lpM_{Core::LinAlg::Initialization::zero};
-
-      //! plastic update tensor
-      Core::LinAlg::Matrix<3, 3> curr_EpM_{Core::LinAlg::Initialization::zero};
-    };
-
-
-    //! struct containing specific derivatives of quantities computed from a given
-    //! elasticity/plasticity state; given: current right Cauchy-Green deformation tensor, inelastic
-    //! deformation gradient and plastic strain
-    struct StateQuantityDerivatives
-    {
-      // ----- current state variable derivatives (for the evaluated Gauss points)----- //
-
-      //! derivative of the elastic right Cauchy_Green deformation tensor w.r.t. the inverse
-      //! inelastic deformation gradient (Voigt stress form)
-      Core::LinAlg::Matrix<6, 9> curr_dCediFin_{Core::LinAlg::Initialization::zero};
-      //! derivative of the elastic right Cauchy_Green deformation tensor w.r.t. the right
-      //! Cauchy-Green deformation tensor (Voigt stress-stress form)
-      Core::LinAlg::Matrix<6, 6> curr_dCedC_{Core::LinAlg::Initialization::zero};
-
-      //! derivatives of the equivalent tensile stress w.r.t. the inverse inelastic deformation
-      //! gradient (Voigt notation)
-      Core::LinAlg::Matrix<1, 9> curr_dequiv_stress_diFin_{Core::LinAlg::Initialization::zero};
-      //! derivatives of the equivalent tensile stress w.r.t. the right Cauchy-Green deformation
-      //! tensor (Voigt stress form)
-      Core::LinAlg::Matrix<1, 6> curr_dequiv_stress_dC_{Core::LinAlg::Initialization::zero};
-
-      //! derivative of the deviatoric, symmetric part of the Mandel stress tensor w.r.t. the
-      //! inverse inelastic deformation gradient (Voigt stress form)
-      Core::LinAlg::Matrix<6, 9> curr_dMe_dev_sym_diFin_{Core::LinAlg::Initialization::zero};
-      //! derivative of the deviatoric, symmetric part of the Mandel stress tensor w.r.t. the right
-      //! Cauchy-Green deformation tensor (Voigt stress-stress form)
-      Core::LinAlg::Matrix<6, 6> curr_dMe_dev_sym_dC_{Core::LinAlg::Initialization::zero};
-
-      //! derivative of the plastic strain rate w.r.t. the equivalent stress
-      double curr_dpsr_dequiv_stress_{0.0};
-      //! derivative of the plastic strain rate w.r.t. the equivalent plastic strain
-      double curr_dpsr_depsp_{0.0};
-
-      //! derivative of the plastic stretching tensor w.r.t. the inverse inelastic deformation
-      //! gradient (Voigt stress form)
-      Core::LinAlg::Matrix<6, 9> curr_ddpdiFin_{Core::LinAlg::Initialization::zero};
-      //! derivative of the plastic stretching tensor w.r.t. the equivalent plastic strain (Voigt
-      //! stress form)
-      Core::LinAlg::Matrix<6, 1> curr_ddpdepsp_{Core::LinAlg::Initialization::zero};
-      //! derivative of the plastic stretching tensor w.r.t. the right Cauchy-Green deformation
-      //! tensor (Voigt stress-stress form)
-      Core::LinAlg::Matrix<6, 6> curr_ddpdC_{Core::LinAlg::Initialization::zero};
-
-      //! derivative of the plastic velocity gradient tensor w.r.t. the inverse inelastic
-      //! deformation gradient (Voigt notation)
-      Core::LinAlg::Matrix<9, 9> curr_dlpdiFin_{Core::LinAlg::Initialization::zero};
-      //! derivative of the plastic velocity gradient tensor w.r.t. the equivalent plastic strain
-      //! (Voigt notation)
-      Core::LinAlg::Matrix<9, 1> curr_dlpdepsp_{Core::LinAlg::Initialization::zero};
-      //! derivative of the plastic velocity gradient tensor w.r.t. the right Cauchy-Green
-      //! deformation tensor (Voigt stress form)
-      Core::LinAlg::Matrix<9, 6> curr_dlpdC_{Core::LinAlg::Initialization::zero};
-
-      //! derivative of the plastic update tensor w.r.t. the inverse inelastic deformation gradient
-      //! (Voigt notation)
-      Core::LinAlg::Matrix<9, 9> curr_dEpdiFin_{Core::LinAlg::Initialization::zero};
-      //! derivative of the plastic update tensor w.r.t. the equivalent plastic strain (Voigt
-      //! notation)
-      Core::LinAlg::Matrix<9, 1> curr_dEpdepsp_{Core::LinAlg::Initialization::zero};
-      //! derivative of the plastic update tensor w.r.t. the right Cauchy-Green deformation tensor
-      //! (Voigt stress form)
-      Core::LinAlg::Matrix<9, 6> curr_dEpdC_{Core::LinAlg::Initialization::zero};
-    };
-
     /*!
      * @brief construct transversely isotropic material
      *
@@ -1379,14 +1587,65 @@ namespace Mat
     void pre_evaluate(const Teuchos::ParameterList& params, const EvaluationContext& context,
         int gp, int eleGID) override;
 
+    /*!
+     * Perform all preparation tasks for the return mapping in the current timestep. In contrast to
+     * the pre_evaluate method, these tasks shall not be repeated in case of the redundant
+     * evaluate call, see Issue #121 at
+     * https://github.com/4C-multiphysics/4C/issues/121. This means that
+     * the current, public pre-evaluate method performs only the safely
+     * repeatable pre-evaluation tasks.
+     * This also means that we prepare and perform the return mapping within
+     * evaluate_inverse_inelastic_defgrad only if we are not in the
+     * redundant call (see quick-fix PR #131 at
+     * https://github.com/4C-multiphysics/4C/pull/131).
+     *
+     * @param[in] defgrad Deformation gradient \f$ \boldsymbol{F} \f$
+     */
+    void prepare_return_mapping(const Core::LinAlg::Matrix<3, 3>& defgrad);
+
+    /*!
+     * @brief Prepare LNGI -> perform all necessary preparation tasks for the evaluation of the LNGI
+     * within the current global iteration, including starting point determination, reset of bounds,
+     * ...
+     */
+    void prepare_lngi(const Core::LinAlg::Matrix<3, 3>& defgrad);
+
+    /*!
+     * @brief Compute and set LNGI starting points for the current time step
+     */
+    void determine_lngi_starting_points();
+
+    /*!
+     * @brief Determine the updated plastic predictor (on the yield surface) iteratively to replace
+     * the initially constructed plastic predictor ; effectively reruns the pre-evaluate routine of
+     * the LNGI with an updated plastic deformation gradient
+     *
+     *  @param[in] defgrad deformation gradient
+     */
+    void determine_updated_plastic_predictor_lngi(const Core::LinAlg::Matrix<3, 3>& defgrad);
+
+    /*!
+     * @brief Update data required for the next timestep LNGI at a given gp
+     *
+     * @param[in] gp Gauss point index
+     */
+    void update_lngi_data(const unsigned int gp);
+
     void update() override;
 
     void pack_inelastic(Core::Communication::PackBuffer& data) const override;
 
     void unpack_inelastic(Core::Communication::UnpackBuffer& buffer) override;
 
-    /*! @brief Evaluate the current state variables based on a given right Cauchy-Green deformation
-     * tensor, given inverse plastic deformation gradient and given equivalent plastic strain
+    void register_output_data_names(
+        std::unordered_map<std::string, int>& names_and_size) const override;
+
+    bool evaluate_output_data(
+        const std::string& name, Core::LinAlg::SerialDenseMatrix& data) const override;
+
+    /*! @brief Evaluate the current state variables based on a given right Cauchy-Green
+     * deformation tensor, given inverse plastic deformation gradient and given equivalent
+     * plastic strain
      *
      * @param[in] CM right Cauchy-Green deformation tensor \f[ \boldsymbol{C} \f] in matrix form
      * @param[in] iFinM inverse inelastic deformation gradient
@@ -1394,10 +1653,13 @@ namespace Mat
      * @param[in] plastic_strain plastic strain  \f$ \varepsilon_{\text{p}} \f$
      * @param[out] err_status error status
      * @param[in] dt time step (or substep) length used for time integration
+     * @param[in] eval_type evaluation type: full evaluation or only
+     * partial evaluation, e.g. stop once the plastic strain rate has
+     * been evaluated
      */
     StateQuantities evaluate_state_quantities(const Core::LinAlg::Matrix<3, 3>& CM,
-        const Core::LinAlg::Matrix<3, 3>& iFinM, const double plastic_strain,
-        Mat::ViscoplastErrorType& err_status, const double dt);
+        const Core::LinAlg::Matrix<3, 3>& iFinM, const double plastic_strain, ErrorType& err_status,
+        const double dt, const StateQuantityEvalType& eval_type);
 
     /*! @brief Evaluate the current state variable derivatives with respect to the right
      * Cauchy-Green deformation tensor, the inverse plastic deformation gradient and the equivalent
@@ -1411,51 +1673,70 @@ namespace Mat
      * @param[in] dt time step length  \f$ \Delta t
      * \f$ (used for the integration)
      * @param[in] eval_state boolean: do we want to also evaluate the current state first (true)
-     *                       or is this already available from the current state variables (false)
+     *                       or is this already available from the
+     *                       current state variables (false)
+     * @param[in] eval_type evaluation type: full evaluation or only
+     * partial evaluation, e.g. stop once the derivatives of the plastic strain rate have
+     * been evaluated
      */
     StateQuantityDerivatives evaluate_state_quantity_derivatives(
         const Core::LinAlg::Matrix<3, 3>& CM, const Core::LinAlg::Matrix<3, 3>& iFinM,
-        const double plastic_strain, Mat::ViscoplastErrorType& err_status, const double dt,
-        const bool eval_state = false);
+        const double plastic_strain, ErrorType& err_status, const double dt,
+        const StateQuantityDerivEvalType& eval_type, const bool eval_state = false);
 
     //! return the fiber direction of transverse isotropy for the considered element
     Core::LinAlg::Matrix<3, 1> get_fiber_direction() { return m_; }
 
-   private:
-    //! struct containing constant tensors which depend on the constant fiber direction \f$
-    //! \boldsymbol{m} \f$
-    struct ConstMatTensors
+    /*!
+     * @brief Set the last_ time step quantities of the material at a
+     * specified GP. To be
+     * used during the debugging of the time integration algorithm.
+     * @note to be used only for debugging purposes!
+     */
+    void debug_set_last_quantities(const int gp,
+        const Core::LinAlg::Matrix<3, 3>& last_plastic_defgrad_inverse,
+        const double last_plastic_strain, const double last_plastic_strain_increment,
+        const double last_equiv_stress, const double last_equiv_stress_elastic_pred,
+        const double last_equiv_stress_plastic_pred, const Core::LinAlg::Matrix<3, 3>& last_defgrad,
+        const Core::LinAlg::Matrix<3, 3>& last_rightCG, const double last_xi_lambda_1,
+        const double last_xi_lambda_2, const std::array<double, 3> last_xi_eigenvect_rot,
+        const double last_max_xi_lambda_1, const double last_max_xi_lambda_2,
+        const std::array<double, 3> last_max_xi_eigenvect_rot, const double optimal_xi_lambda_1,
+        const double optimal_xi_lambda_2, const std::array<double, 3> optimal_xi_eigenvect_rot);
+
+    /*!
+     * @brief Get the utilized viscoplastic law object.
+     * @note to be used only for debugging purposes!
+     */
+    std::shared_ptr<Mat::Viscoplastic::Law> debug_get_viscoplastic_law()
     {
-      //! \f$ \boldsymbol{I} + \boldsymbol{m} \otimes \boldsymbol{m} \f$
-      Core::LinAlg::Matrix<3, 3> id_plus_mm_;
-      //! \f$ \boldsymbol{m} \otimes \boldsymbol{m} \f$
-      Core::LinAlg::Matrix<3, 3> mm_{Core::LinAlg::Initialization::zero};
-      //! deviatoric part \f$ \left( \boldsymbol{m} \otimes \boldsymbol{m}
-      //! \right)_\text{dev}\f$
-      Core::LinAlg::Matrix<3, 3> mm_dev_{Core::LinAlg::Initialization::zero};
-      //! \f$ \left( \boldsymbol{m} \otimes \boldsymbol{m} \right) \otimes \left( \boldsymbol{m}
-      //! \otimes \boldsymbol{m} \right) \f$ (Voigt stress-stress form)
-      Core::LinAlg::Matrix<6, 6> mm_dyad_mm_{Core::LinAlg::Initialization::zero};
-      //!  \f$ \left( \boldsymbol{m} \otimes \boldsymbol{m} \right)_\text{dev} \otimes \left(
-      //!  \boldsymbol{m} \otimes \boldsymbol{m}
-      //!  \right) \f$
-      //! (Voigt stress-stress form)
-      Core::LinAlg::Matrix<6, 6> mm_dev_dyad_mm_{Core::LinAlg::Initialization::zero};
-      //!  \f$ \boldsymbol{I} \otimes \left( \boldsymbol{m} \otimes \boldsymbol{m}
-      //!  \right) \f$
-      //! (Voigt stress-stress form)
-      Core::LinAlg::Matrix<6, 6> id_dyad_mm_;
-
-      //! set tensors for a given fiber direction \f$ \boldsymbol{m} \f$
-      void set_material_const_tensors(const Core::LinAlg::Matrix<3, 1>& m);
+      return viscoplastic_law_;
     };
-    ConstMatTensors const_mat_tensors_;
 
+    /*!
+     * @brief Set the flag for updating history variables.
+     * @note to be used only for debugging purposes!
+     */
+    void debug_set_update_hist_var(const bool update_hist_var)
+    {
+      update_hist_var_ = update_hist_var;
+    }
+
+   private:
+    //! constant material tensors     (isotropic: constant tensors
+    //! such
+    //! as identity matrices; transversely-isotropic: also contains
+    //! tensors associated with the director vector)
+    ConstMatTensors const_mat_tensors_;
 
     //! current Gauss Point
     int gp_;
     //! current element ID
     int ele_gid_;
+
+    //! parameter list
+    Teuchos::ParameterList params_;
+
 
     //! map to elastic materials/potential summands (only isotropic)
     std::vector<std::shared_ptr<Mat::Elastic::Summand>> potsumel_;
@@ -1472,56 +1753,27 @@ namespace Mat
     //! fiber direction (director vector)
     Core::LinAlg::Matrix<3, 1> m_;
 
+    //! utilities for evaluating the matrix exponential and logarithm
+    MatrixExpLogUtils matrix_exp_log_utils_;
+
     //! boolean to control whether the history variables should be updated during evaluation
     bool update_hist_var_ = true;
 
-    //! struct containing settings for time step lengths
-    struct TimeStepSettings
-    {
-      //! time step length
-      double dt_;
-      //! minimum substep length
-      double min_dt_;
-    };
-    TimeStepSettings time_step_settings_;
+    //! boolean to control whether to use the elastic predictor directly or to use LNGI (in cases
+    //! where performing the LNGI is ineffective, e.g., if the elastic predictor already leads to a
+    //! very small plastic strain increment)
+    bool use_elastic_predictor_ = false;
 
+    //! control variable: should the Local Newton Guess Interpolation compute its starting points
+    //! within the current time step? -> we want to do this only once for all GP for the current
+    //! starting point choices, since these computations can get expensive
+    bool compute_lngi_starting_points_ = false;
 
-    //! struct containing quantities at the last and current time points (i.e., at \f[ t_n \f] and
-    //! \f[ t_{n+1} \f], respectively). The quantities are tracked at all Gauss points, in order to
-    //! update them simultaneously during the update method call
-    struct TimeStepQuantities
-    {
-      //! right Cauchy-Green deformation tensor at the last time step (for all Gauss points)
-      std::vector<Core::LinAlg::Matrix<3, 3>> last_rightCG_;
+    //! tracker for time step settings and time instants
+    TimeStepTracker time_step_tracker_;
 
-      //! inverse plastic deformation gradient at the last time step (for all Gauss points)
-      std::vector<Core::LinAlg::Matrix<3, 3>> last_plastic_defgrd_inverse_;
-
-      //! (equivalent) plastic strain at the last time step (for all Gauss points)
-      std::vector<double> last_plastic_strain_;
-
-      //! temporary variable, for which we store the right Cauchy-Green deformation tensor at each
-      //! evaluation (used in order to update last_rightCG_ once outer NR converges) (for all Gauss
-      //! points)
-      std::vector<Core::LinAlg::Matrix<3, 3>> current_rightCG_;
-
-      //! current (reduced) deformation gradient: used to check whether the inverse inelastic
-      //! deformation gradient has already been evaluated (to improve the computation performance)
-      std::vector<Core::LinAlg::Matrix<3, 3>> current_defgrad_;
-
-
-      //! current inverse plastic deformation gradient (for all Gauss points)
-      std::vector<Core::LinAlg::Matrix<3, 3>> current_plastic_defgrd_inverse_;
-
-      //! current plastic strain (for all Gauss points)
-      std::vector<double> current_plastic_strain_;
-
-      //! inverse plastic deformation gradient at the last computed time instant (after the last
-      //! converged substep)
-      std::vector<Core::LinAlg::Matrix<3, 3>> last_substep_plastic_defgrd_inverse_;
-      //! plastic strain at the last computed time instant (after the last converged substep)
-      std::vector<double> last_substep_plastic_strain_;
-    };
+    //! tracker for quantities at the last and current time points (i.e., at \f[ t_n \f] and
+    //! \f[ t_{n+1} \f], respectively) for all Gauss points simultaneously
     TimeStepQuantities time_step_quantities_;
 
     //! evaluated state quantities
@@ -1540,33 +1792,31 @@ namespace Mat
     //! based on the reference matrices of the current time step)
     const std::vector<double> ref_locs_{0.0, 1.0};
 
-    //! struct with substepping parameters
-    struct SubstepParams
-    {
-      //! current time parameter ranging from 0 to the problem time step \f$ \Delta t \f$
-      double t;
-      //! counter of evaluated substeps
-      unsigned int substep_counter;
-      //! current substep size
-      double curr_dt;
-      //! number of times the problem time step \f$ \Delta t \f$ has been halved
-      unsigned int time_step_halving_counter;
-      //!  current total number of substeps to be evaluated within the time step \f$ \Delta t
-      //! \f$; this is not always given by time_step_halving_counter, since the
-      //! halving does not have to be uniform (e.g. we could halve the time step twice and still
-      //! have 3 substeps to evaluate instead of 4, i.e. if the first substep was evaluable
-      //! numerically, but the second substep not, leading to another halving of the substep length)
-      unsigned int total_num_of_substeps;
-      //! iteration counter of the Local Newton Loop used to evaluate each substep
-      unsigned int iter;
-    };
+    //! tracker object for the Local Newton initial guess interpolation
+    LocalNewtonGuessInterpolation lnl_guess_interpolation_;
 
+    //! tracker for current global iteration index
+    unsigned int globiter_;
+
+    //! micro iteration data for all microiterations
+    //! of the Local Newton Guess Interpolation, to be written to csv
+    CSVOutputPredAdaptMicroIterData csv_output_lngi_micro_iter_data_;
+
+    //! micro iteration data for all microiterations
+    //! of the line search, to be written to csv
+    CSVOutputLineSearchMicroIterData csv_output_line_search_micro_iter_data_;
+
+    //! tracker object for the local substepping procedure
+    LocalSubsteppingUtils local_substepping_utils_;
+
+    //! tracking object for Local Newton data
+    mutable LocalNewtonData lnl_data_;
 
     /*!
      * @brief Calculate the Holzapfel gamma and delta values of the isotropic elastic material
      * components
-     * @param[in] CeM elastic right Cauchy_Green deformation tensor \f$ \boldsymbol{C}_\text{e} \f$
-     * in matrix form
+     * @param[in] CeM elastic right Cauchy_Green deformation tensor \f$ \boldsymbol{C}_\text{e}
+     * \f$ in matrix form
      * @param[out] gamma stress factors for the isotropic elasticity case, as derived in
      *                   Holzapfel - Nonlinear Solid Mechanics(2000)
      * @param[out] delta constitutive tensor factors for the isotropic elasticity case, as derived
@@ -1576,8 +1826,9 @@ namespace Mat
         Core::LinAlg::Matrix<3, 1>& gamma, Core::LinAlg::Matrix<8, 1>& delta);
 
     /*!
-     * @brief Check if the elastic predictor provides the solution for the current time step, i.e.,
-     * the deformation in the current time step is purely elastic with no viscoplastic contribution.
+     * @brief Check if the elastic predictor provides the solution for the current time step,
+     * i.e., the deformation in the current time step is purely elastic with no viscoplastic
+     * contribution.
      *
      * @param[in] CM right Cauchy_Green deformation tensor \f$ \boldsymbol{C} \f$ in matrix form
      * @param[in] iFinM_pred predictor of the inverse inelastic deformation gradient \f$
@@ -1587,17 +1838,20 @@ namespace Mat
      * @param[out] err_status error status
      * @return boolean value: true (predictor = solution), or false (predictor != solution)
      */
-    bool check_predictor(const Core::LinAlg::Matrix<3, 3>& CM,
+    bool check_elastic_predictor(const Core::LinAlg::Matrix<3, 3>& CM,
         const Core::LinAlg::Matrix<3, 3>& iFinM_pred, const double plastic_strain_pred,
-        Mat::ViscoplastErrorType& err_status);
+        ErrorType& err_status);
 
     /*!
      * @brief Calculate the residual for the Local Newton Loop (LNL)
      *
+     * @note The state quantities are updated in this method, since they
+     * are used for the computation of the residual!
+     *
      * @param[in] CM right Cauchy_Green deformation tensor \f$ \boldsymbol{C} \f$ in matrix form
-     * @param[in] x vector of Local Newton Loop unknowns, composed of the components of the inverse
-     *             inelastic deformation gradient \f$ \boldsymbol{F}_{\text{in}}^{-1} \f$ and
-     *             plastic strain \f$ \varepsilon_{\text{p}} \f$
+     * @param[in] x vector of Local Newton Loop unknowns, composed of the components of the
+     * inverse inelastic deformation gradient \f$ \boldsymbol{F}_{\text{in}}^{-1} \f$ and plastic
+     * strain \f$ \varepsilon_{\text{p}} \f$
      * @param[in] last_iFpM last inverse plastic deformation gradient
      *                      \f$ \boldsymbol{F}_{\text{in}, n}^{-1} \f$ in matrix form
      * @param[in] last_plastic_strain last plastic strain \f$ \varepsilon_{\text{p}, n}\f$
@@ -1608,7 +1862,7 @@ namespace Mat
     Core::LinAlg::Matrix<10, 1> calculate_local_newton_loop_residual(
         const Core::LinAlg::Matrix<3, 3>& CM, const Core::LinAlg::Matrix<10, 1>& x,
         const Core::LinAlg::Matrix<3, 3>& last_iFinM, const double last_plastic_strain,
-        const double dt, Mat::ViscoplastErrorType& err_status);
+        const double dt, ErrorType& err_status);
 
 
     /*!
@@ -1616,10 +1870,14 @@ namespace Mat
      * compute the 10 x 10 Jacobian matrix required for the Local Newton Loop and the
      * linearization for the Global Newton Loop
      *
+     * @note The state quantity derivatives are updated in this method.
+     * They require the state quantities, which were evaluated and stored
+     * previously when calculating the residual.
+     *
      * @param[in] CM right Cauchy_Green deformation tensor \f$ \boldsymbol{C} \f$ in matrix form
-     * @param[in] x vector of Local Newton Loop unknowns, composed of the components of the inverse
-     *             inelastic deformation gradient \f$ \boldsymbol{F}_{\text{in}}^{-1} \f$ and
-     *             plastic strain \f$ \varepsilon_{\text{p}} \f$
+     * @param[in] x vector of Local Newton Loop unknowns, composed of the components of the
+     * inverse inelastic deformation gradient \f$ \boldsymbol{F}_{\text{in}}^{-1} \f$ and plastic
+     * strain \f$ \varepsilon_{\text{p}} \f$
      * @param[in] last_iFpM last inverse plastic deformation gradient
      *                      \f$ \boldsymbol{F}_{\text{in}, n}^{-1} \f$ in matrix form
      * @param[in] last_plastic_strain last plastic strain \f$ \varepsilon_{\text{p}, n}\f$
@@ -1630,48 +1888,179 @@ namespace Mat
      */
     Core::LinAlg::Matrix<10, 10> calculate_jacobian(const Core::LinAlg::Matrix<3, 3>& CM,
         const Core::LinAlg::Matrix<10, 1>& x, const Core::LinAlg::Matrix<3, 3>& last_iFinM,
-        const double last_plastic_strain, const double dt, Mat::ViscoplastErrorType& err_status);
+        const double last_plastic_strain, const double dt, ErrorType& err_status);
 
+    /*!
+     * @brief Interpolate a valid initial guess for the Local Newton Loop,
+     * provided a current initial guess
+     *
+     * @note If the current initial guess is a valid initial guess (i.e.,
+     * numerically evaluable and leads to plastic flow), then it is directly
+     * return without further interpolation
+     * @param[in] FM deformation gradient
+     * @return interpolated initial guess with the same structure as the current
+     * initial guess
+     */
+    Core::LinAlg::Matrix<10, 1> interpolate_local_newton_guess(
+        const Core::LinAlg::Matrix<3, 3>& FM);
 
     /*!
      * @brief Local Newton Loop in order to calculate the current inverse plastic deformation
      * gradient and the current plastic strain value
      *
      * @param[in] defgrad deformation gradient \f$ \boldsymbol{F} \f$ in matrix form
-     * @param[in] x predictor of Local Newton Loop, composed of the components of the
+     * @param[in] x initial guess of Local Newton Loop, composed of the components of the
      *              inverse inelastic deformation gradient \f$ \boldsymbol{F}_{\text{in}}^{-1} \f$
      *              and plastic strain \f$ \varepsilon_{\text{p}} \f$
      * @param[out] err_status error status
-     * @return solution vector of the Local Newton Loop, structured analogously to the predictor x
+     * @return solution vector of the Local Newton Loop, structured analogously to the initial guess
+     * x
      */
     Core::LinAlg::Matrix<10, 1> local_newton_loop(const Core::LinAlg::Matrix<3, 3>& defgrad,
-        const Core::LinAlg::Matrix<10, 1>& x, Mat::ViscoplastErrorType& err_status);
+        const Core::LinAlg::Matrix<10, 1>& x, ErrorType& err_status);
 
 
     /*!
-     * @brief Setup new substep in the Local Newton Loop in case of an encountered evaluation error
+     * @brief Performs return mapping at each GP. It first evaluates whether the elastic predictor
+     * is suitable as a solution, and performs the local time integration (Local Newton Loop)
+     * afterwards.
      *
-     * @param[in, out] substep_params parameters of the substepping procedure
-     * @param[out] sol current solution vector of the Local Newton Loop (reset to the last
+     * @param[in] FredM reduced deformation gradient \f$ \boldsymbol{F}_{\text{red}} =
+     * \boldsymbol{F} \boldsymbol{F_{\text{in,other}}^{-1}} \f$ accounting for all the already
+     * computed inelastic defgrad factors
+     * @return inverse inelastic deformation gradient \boldsymbol{F}_{\text{in}}^{-1}
+     */
+    Core::LinAlg::Matrix<3, 3> return_mapping(const Core::LinAlg::Matrix<3, 3>& FredM);
+
+
+    /*!
+     * @brief Compute the plastic strain \f$
+     * \varepsilon^{\text{p}}_{n+1} \f$, given the equivalent stress \f$
+     * \overline{\sigma} \f$.
+     *
+     * The computation is performed using the discretized evolution
+     * equation (Backward Euler):
+     * \f$ \varepsilon^{\text{p}}_{n+1} =  \varepsilon^{\text{p}}_{n} +
+     * \Delta t v^{\text{p}}(\overline{sigma}_{n+1},
+     * \varepsilon^{\text{p}}_{n+1}) \f$, where \f$
+     * v^{\text{p}}(\overline{\sigma}, \varepsilon^{\text{p}})  \f$
+     * is characteristic to the employed flow rule.
+     *
+     *
+     * @param[in] equiv_stress equivalent stress \f$ \overline{\sigma}_{n+1} \f$
+     * @param[in] last_plastic_strain plastic strain at the last time instant \f$
+     * \varepsilon^{\text{p}}_{n} \f$
+     * @param[in] dt time step \f$ \Delta t \f$
+     * @param[out] err_status error status
+     * @return plastic strain \f$ \varepsilon^{\text{p}}_{n+1} \f$
+     */
+    double integrate_plastic_strain(const double equiv_stress, const double last_plastic_strain,
+        const double dt, ErrorType& err_status);
+
+    /*!
+     * @brief Evaluate whether this is a valid initial guess for the Local
+     * Newton scheme: numerically
+     * evaluable residual and Jacobian, and leading to plastic flow
+     *
+     * @param[in] defgrad Deformation gradient
+     * @param[in] inv_defgrad Inverse deformation gradient
+     * @param[in] right_cg_tensor Right Cauchy-Green deformation tensor
+     * @param[in] inv_plastic_defgrad_guess Inverse plastic
+     * deformation gradient to be verified as initial guess
+     * @param[in] plastic_strain_guess Inverse plastic
+     * strain to be verified as initial guess
+     * @param[out] err_status Error type obtained during verification
+     * @param[out] state_quantities State quantities obtained during
+     * verification
+     * @param[out] state_quantity_derivatives State quantity derivatives obtained during
+     * verification
+     */
+    void is_valid_local_newton_initial_guess(const Core::LinAlg::Matrix<3, 3>& defgrad,
+        const Core::LinAlg::Matrix<3, 3>& inv_defgrad,
+        const Core::LinAlg::Matrix<3, 3>& right_cg_tensor,
+        const Core::LinAlg::Matrix<3, 3>& inv_plastic_defgrad_guess,
+        const double plastic_strain_guess, ErrorType& err_status, StateQuantities& state_quantities,
+        StateQuantityDerivatives& state_quantity_derivatives);
+
+    /*!
+     * @brief Get the line search step size  for the current iteration of
+     * the Local Newton Loop
+     *
+     * @note During the iterations of the Local Newton Loop, the plastic
+     * strain may be updated such that it becomes negative, which is both
+     * nonphysical and problematic in the computation of certain
+     * viscoplasticity flow rules and/or hardening models. To address
+     * this, we compute a line search parameter $\alpha_i$
+     * to update the solution f$ \boldsymbol{s}_{i+1} =
+     * \boldsymbol{s}_{i} + \alpha_i \Delta \boldsymbol{s}_{i+1} \f$
+     * such that the negative plastic strain is limited to positive
+     * values. Analogously, we account for other possible errors, such
+     * as e.g, overflow. For the inexact line search, we use the backtracking
+     * algorithm as presented in:
+     *
+     * -# Andrei 2022, Modern Numerical Nonlinear Optimization, Vol.
+     * 195, Springer Optimization and its Applications, DOI:
+     * 10.1007/978-3-031-08720-2
+     *
+     * @param[in] curr_sol solution of the current iteration of the
+     * Local Newton Loop \f$ \boldsymbol{s}_i \f$
+     * @param[in] CM right Cauchy_Green deformation tensor \f$ \boldsymbol{C} \f$ in matrix form
+     * @param[in] curr_res residual of the current iteration of the
+     * Local Newton Loop \f$ \boldsymbol{r}_{\boldsymbol{s}_i} \f$
+     * @param[in] incr increment \f$ \Delta \boldsymbol{s}_{i+1} \f$ for
+     * the update of the solution vector
+     * @param[out] err_status error status
+     * @return line search step \f$ \alpha \f$
+     *
+     */
+    double get_line_search_step(const Core::LinAlg::Matrix<10, 1>& curr_sol,
+        const Core::LinAlg::Matrix<3, 3>& CM, const Core::LinAlg::Matrix<10, 1>& curr_res,
+        const Core::LinAlg::Matrix<10, 1>& incr, ErrorType& err_status);
+
+
+    /*!
+     * @brief Setup new substep in the Local Newton Loop in case of an encountered evaluation
+     * error
+     *
+     * @param[in,out] sol current solution vector of the Local Newton Loop (reset to the last
      * converged value within this method)
-     * @param[out] curr_CM current right Cauchy-Green deformation tensor, interpolated using
+     * @param[in,out] curr_CM current right Cauchy-Green deformation tensor, interpolated using
      * the reference matrices of the time step (interpolated again within this method with the
      * updated new substep length)
      * @return error status for the new substep (true: no errors, false: we have halved the time
      * step too many times)
      *
      */
-    bool prepare_new_substep(SubstepParams& substep_params, Core::LinAlg::Matrix<10, 1>& sol,
-        Core::LinAlg::Matrix<3, 3>& curr_CM);
+    bool prepare_new_substep(Core::LinAlg::Matrix<10, 1>& sol, Core::LinAlg::Matrix<3, 3>& curr_CM);
 
     /*!
-     * @brief Evaluate the additional cmat stiffness tensor using a perturbation-based approach, if
+     * @brief Routine utilized during the Local Newton Loop
+     * evaluations. The performed steps depend on the input error status
+     * and the user settings (e.g. substepping, Local Newton Guess
+     * Reinterpolations, ...).
+     *
+     *
+     * @param[in] err_status error status
+     * @param[in,out] sol current solution vector of the Local Newton Loop (reset to the last
+     * converged value within this method)
+     * @param[in,out] curr_CM current right Cauchy-Green deformation tensor, interpolated using
+     * the reference matrices of the time step (interpolated again within this method with the
+     * updated new substep length)
+     * @return action to be performed subsequently in the LNL
+     */
+    ErrorAction manage_evaluation_error(const ErrorType& err_status,
+        Core::LinAlg::Matrix<10, 1>& sol, Core::LinAlg::Matrix<3, 3>& curr_CM);
+
+    /*!
+     * @brief Evaluate the additional cmat stiffness tensor using a perturbation-based approach,
+     if
      * the analytical evaluation fails
      *
      * @note For further information on the procedure, refer to:
      *       -# Master's Thesis : Dragos-Corneliu Ana, Continuum Modeling and Calibration of
      * Viscoplasticity in the Context of the Lithium Anode in Solid State Batteries, Supervisor:
-     * Christoph Schmidt, 2024
+     *
+     Christoph Schmidt, 2024
      *
      * @param[in] FredM reduced deformation gradient \f$ \boldsymbol{F}_{\text{red}} =
      * \boldsymbol{F} \boldsymbol{F_{\text{in,other}}^{-1}} \f$ accounting for all the already
@@ -1686,9 +2075,105 @@ namespace Mat
     void evaluate_additional_cmat_perturb_based(const Core::LinAlg::Matrix<3, 3>& FredM,
         Core::LinAlg::Matrix<6, 6>& cmatadd, const Core::LinAlg::Matrix<3, 3>& iFin_other,
         const Core::LinAlg::Matrix<6, 9>& dSdiFinj);
+
+    /*!
+     * @brief Get an extensive error message to be displayed when the
+     * simulation terminates. This is used for debugging the time
+     * integration in more detail. This message contains a base error
+     * message which describes what failed in a short form - this is
+     * then extended with information on the element ID, the Gauss
+     * Point, the last_ values and so on...
+     *
+     * @param[in] base_error_string base error message to be extended
+     * with further information
+     */
+    std::string debug_get_error_info(const std::string& base_error_string);
+
+
+    // benchmarking procedure: runs a specific function in a loop until the
+    // computation time converges based on a specified relative tolerance
+    template <typename Func, typename... Args>
+    double benchmark_function(std::string func_descr, Teuchos::Time& func_timer,
+        const double relative_tol, bool& increment_timint_analysis_vars, int& num_of_required_iters,
+        Func&& func, Args&&... args)
+    {
+      // average computation time (current iteration)
+      double avg_time = 0.0;
+
+      // average computation time (previous iteration)
+      double prev_avg_time = 0.0;
+
+      // number of performed iterations / repetitions
+      num_of_required_iters = 0;
+
+      // minimum and maximum numbers of iterations
+      constexpr int warmup_iters = 3;    // number of warm-up iterations
+      constexpr int max_iters = 100000;  // safety cap
+
+      // start timer
+      func_timer.start(true);
+
+      // loop over iterations
+      while (true)
+      {
+        // increment iterations and check safety cap
+        ++num_of_required_iters;
+        FOUR_C_ASSERT_ALWAYS(num_of_required_iters < max_iters,
+            "Maximum number of repetitions {} was reached without a converged computation time for "
+            "the function [{}]",
+            max_iters, func_descr);
+
+        // set tracker variable for iters, steps, errors, ...
+        increment_timint_analysis_vars =
+            (num_of_required_iters ==
+                1);  // only track iters, steps, errors, ... for
+                     // the first repetition / iteration of the procedure to be benchmarked
+
+
+        // reset timer upon reaching minimum number of iterations (warm-up
+        // iterations)
+        if (num_of_required_iters == warmup_iters)
+        {
+          func_timer.reset();
+          continue;
+        }
+
+        // run function to be timed
+        func(std::forward<Args>(args)...);
+
+        // if this is not a warm-up iteration anymore, we calculate
+        // relative change and check for convergence
+        if (num_of_required_iters > warmup_iters)
+        {
+          // get current elapsed time
+          const double t = func_timer.totalElapsedTime(true);
+
+          // running average
+          avg_time = t / (num_of_required_iters - warmup_iters);
+
+          // check for convergence based on the relative tolerance
+          const double rel_change = std::abs(avg_time - prev_avg_time) / avg_time;
+
+
+          // if convergence is reached: stop the timer and break out of the loop
+          if (rel_change < relative_tol)
+          {
+            func_timer.stop();
+            break;
+          }
+
+          // set previous times for the next iteration
+          prev_avg_time = avg_time;
+        }
+      }
+      // set control variable to true, since we exit the benchmarking procedure
+      increment_timint_analysis_vars = true;
+
+      // return average time
+      return avg_time;
+    }
   };
 }  // namespace Mat
-
 FOUR_C_NAMESPACE_CLOSE
 
 #endif

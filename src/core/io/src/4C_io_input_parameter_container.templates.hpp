@@ -17,6 +17,12 @@
 
 FOUR_C_NAMESPACE_OPEN
 
+namespace Core::IO::Internal::InputParameterContainerImplementation
+{
+  using magic_enum::iostream_operators::operator<<;
+  using magic_enum::iostream_operators::operator>>;
+}  // namespace Core::IO::Internal::InputParameterContainerImplementation
+
 // The add() function requires expensive-to-include Teuchos headers, but it is rarely needed, since
 // most user code only reads from the InputParameterContainer. Therefore, we put the implementation
 // into this special templates file.

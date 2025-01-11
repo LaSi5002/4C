@@ -46,6 +46,7 @@ namespace Mat
 
         std::shared_ptr<Core::Mat::Material> create_material() override { return nullptr; };
 
+
         // getter methods
         //! get strain rate prefactor \f$ \dot{P}_0 \f$
         [[nodiscard]] double strain_rate_pre_fac() const { return strain_rate_prefac_; };
@@ -58,6 +59,12 @@ namespace Mat
         [[nodiscard]] double isotrop_harden_prefac() const { return isotrop_harden_prefac_; };
         //! get exponent of the isotropic hardening stress \f$ n \f$
         [[nodiscard]] double isotrop_harden_exp() const { return isotrop_harden_exp_; };
+        //! get reference temperature
+        [[nodiscard]] double ref_temperature() const { return ref_temperature_; };
+        //! get melting temperature
+        [[nodiscard]] double melt_temperature() const { return melt_temperature_; };
+        //! get temperature sensitivity factor
+        [[nodiscard]] double temperature_sens() const { return temperature_sens_; };
 
        private:
         //! strain rate prefactor \f$ \dot{P}_0 \f$
@@ -75,6 +82,15 @@ namespace Mat
 
         //! exponent of the isotropic hardening stress \f$ n \f$
         const double isotrop_harden_exp_;
+
+        //! reference temperature \f$ T_{\mathrm{ref}} \f$
+        const double ref_temperature_;
+
+        //! melting temperature \f$ T_{\mathrm{melt}} \f$
+        const double melt_temperature_;
+
+        //! temperature sensitivity \f$ M \f$
+        const double temperature_sens_;
       };
     }  // namespace PAR
 
@@ -105,26 +121,36 @@ namespace Mat
           const double equiv_stress, const double equiv_plastic_strain) override;
 
       double evaluate_plastic_strain_rate(const double equiv_stress,
-          const double equiv_plastic_strain, const double dt, const bool log_substep,
-          Mat::ViscoplastErrorType& err_status, const bool update_hist_var) override;
+          const double equiv_plastic_strain, const double dt, const double max_plastic_strain_incr,
+          Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status,
+          const bool update_hist_var) override;
 
       Core::LinAlg::Matrix<2, 1> evaluate_derivatives_of_plastic_strain_rate(
           const double equiv_stress, const double equiv_plastic_strain, const double dt,
-          const bool log_substep, Mat::ViscoplastErrorType& err_status,
+          const double max_plastic_strain_deriv_incr,
+          Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status,
           const bool update_hist_var) override;
 
       void setup(const int numgp, const Discret::Elements::Fibers& fibers,
-          const std::optional<Discret::Elements::CoordinateSystem>& coord_system) override {};
+          const std::optional<Discret::Elements::CoordinateSystem>& coord_system) override;
 
-      void pre_evaluate(int gp) override {};
+
+      void pre_evaluate(
+          const Teuchos::ParameterList& params, const int gp, const int ele_gid) override;
 
       void update() override {};
 
       void update_gp_state(int gp) override {};
 
-      void pack_viscoplastic_law(Core::Communication::PackBuffer& data) const override {};
+      void pack_viscoplastic_law(Core::Communication::PackBuffer& data) const override;
 
-      void unpack_viscoplastic_law(Core::Communication::UnpackBuffer& buffer) override {};
+      void unpack_viscoplastic_law(Core::Communication::UnpackBuffer& buffer) override;
+
+      void register_output_data_names(
+          std::unordered_map<std::string, int>& names_and_size) const override;
+
+      bool evaluate_output_data(
+          const std::string& name, Core::LinAlg::SerialDenseMatrix& data) const override;
 
      private:
       /// struct containing constant parameters to be evaluated only once
@@ -154,7 +180,6 @@ namespace Mat
         /// initial yield strength
         double sigma_Y0;
 
-
         /// constructor
         ConstPars(const double prefac, const double expon, const double harden_prefac,
             const double harden_expon, const double initial_yield_strength)
@@ -164,14 +189,44 @@ namespace Mat
               log_p_e(std::log(prefac * expon)),
               B(harden_prefac),
               N(harden_expon),
-              log_B_N(std::log(harden_prefac * harden_expon)),
+              log_B_N(set_log_b_n(harden_prefac, harden_expon)),
               sigma_Y0(initial_yield_strength)
         {
+        }
+
+        /// helper function to set log(B * N): in the case of perfect plasticity
+        /// B == 0, we set this value to 0.0; also, we dismiss softening with B
+        /// < 0.0 so far
+        double set_log_b_n(const double B, const double N)
+        {
+          if (B == 0.0)
+            return 0.0;
+          else if (B < 0.0)
+            FOUR_C_THROW(
+                "The hardening prefactor is {}; Softening is not yet enabled for the Reformulated "
+                "Johnson-Cook Law!",
+                B);
+          else
+            return std::log(B * N);
         }
       };
 
       /// instance of ConstPars struct
       const ConstPars const_pars_;
+
+      /// temperature ratio \f$ D_T = 1 - \frac{T^M - T_{\mathrm{ref}}^M}{T_{\mathrm{melt}}^M -
+      /// T_{\mathrm{ref}}^M} \f$
+      double temperature_ratio_;
+
+      //! struct containing quantities at the current time point (i.e., at \f[ t_n \f]). The
+      //! quantities are tracked at all Gauss points, in order to update them simultaneously during
+      //! the update method call
+      struct TimeStepQuantities
+      {
+        //! yield strength (for all Gauss points)
+        std::vector<double> current_yield_strength_;
+      };
+      TimeStepQuantities time_step_quantities_;
     };
 
   }  // namespace Viscoplastic

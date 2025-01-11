@@ -52,9 +52,8 @@ MATERIALS:
       YIELD_COND_A: 0
       YIELD_COND_B: 0
       YIELD_COND_F: 0
-      ANISOTROPY: "isotrop"
-      LOG_SUBSTEP: true
-      MAX_HALVE_NUM_SUBSTEP: 10
+      MAT_BEHAVIOR: isotrop
+      MAX_SUBSTEPPING_HALVE_NUM: 1
   - MAT: 4
     MAT_ViscoplasticLawReformulatedJohnsonCook:
       STRAIN_RATE_PREFAC: 1
@@ -85,25 +84,25 @@ RESULT DESCRIPTION:
       DIS: "structure"
       NODE: 4
       QUANTITY: "dispy"
-      VALUE: -0.003966194599572764
+      VALUE: -0.003966194624004241
       TOLERANCE: 4e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 5
       QUANTITY: "dispx"
-      VALUE: -0.0039661945995734475
+      VALUE: -0.00396619462400423
       TOLERANCE: 4e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 8
       QUANTITY: "dispx"
-      VALUE: -0.0039661945995732185
+      VALUE: -0.0039661946240031375
       TOLERANCE: 4e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 8
       QUANTITY: "dispy"
-      VALUE: -0.0039661945995739184
+      VALUE: -0.003966194624003311
       TOLERANCE: 4e-11
   - STRUCTURE:
       DIS: "structure"
@@ -115,19 +114,19 @@ RESULT DESCRIPTION:
       DIS: "structure"
       NODE: 6
       QUANTITY: "dispx"
-      VALUE: -0.003966194599575029
+      VALUE: -0.003966194624003274
       TOLERANCE: 4e-11
   - STRUCTURE:
       DIS: "structure"
       NODE: 4
       QUANTITY: "stress_zz"
-      VALUE: 978.4575843807388
+      VALUE: 978.4575847399828
       TOLERANCE: 0.00098
   - STRUCTURE:
       DIS: "structure"
       NODE: 8
       QUANTITY: "stress_zz"
-      VALUE: 978.4575843813795
+      VALUE: 978.4575847395217
       TOLERANCE: 0.00098
 DESIGN POINT DIRICH CONDITIONS:
   - E: 1
