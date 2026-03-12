@@ -601,49 +601,6 @@ namespace
     return (diff_p <= num_tolerance);
   }
 
-  // compute matrix from its spectral-polar decomposed components \f$ \boldsymbol{T}
-  // = \boldsymbol{R} \boldsymbol{Q}^{T} \boldsymbol{\lambda} \boldsymbol{Q} \f$: sorted
-  // eigenvalues, relative eigenvector rotation (specified using a
-  // rotation vector) with respect to a reference
-  // eigenvector rotation matrix, and a rotation matrix \f$ \boldsymbol{R} \f$
-  Core::LinAlg::Matrix<3, 3> compute_matrix_from_decomposed_components(const double lambda_1,
-      const double lambda_2, const double lambda_3,
-      const Core::LinAlg::Matrix<3, 3>& reference_eigenvect_rot_matrix,
-      const Core::LinAlg::Matrix<3, 1>& rel_eigenvect_rot_vect,
-      const Core::LinAlg::Matrix<3, 3>& rot_matrix)
-  {
-    // declare output
-    Core::LinAlg::Matrix<3, 3> output{Core::LinAlg::Initialization::zero};
-
-    // construct eigenvalue matrix
-    Core::LinAlg::Matrix<3, 3> eigenval_matrix{Core::LinAlg::Initialization::zero};
-    eigenval_matrix(0, 0) = lambda_1;
-    eigenval_matrix(1, 1) = lambda_2;
-    eigenval_matrix(2, 2) = lambda_3;
-
-
-    // construct eigenvector matrix
-    Core::LinAlg::Matrix<3, 3> rel_eigenvect_rot_matrix =
-        Core::LinAlg::calc_rot_matrix_from_rot_vect(rel_eigenvect_rot_vect);
-    Core::LinAlg::Matrix<3, 3> eigenvect_rot_matrix{Core::LinAlg::Initialization::zero};
-    eigenvect_rot_matrix.multiply_nn(
-        1.0, reference_eigenvect_rot_matrix, rel_eigenvect_rot_matrix, 0.0);
-
-
-    // construct output matrix
-    Core::LinAlg::Matrix<3, 3> LQ{Core::LinAlg::Initialization::zero};
-    LQ.multiply_nn(1.0, eigenval_matrix, eigenvect_rot_matrix, 0.0);
-    Core::LinAlg::Matrix<3, 3> QTLQ{Core::LinAlg::Initialization::zero};
-    QTLQ.multiply_tn(1.0, eigenvect_rot_matrix, LQ, 0.0);
-    output.multiply_nn(1.0, rot_matrix, QTLQ, 0.0);
-
-
-    return output;
-  }
-
-  using Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::debug_mode;
-
-
 }  // namespace
 
 
@@ -851,7 +808,6 @@ Mat::PAR::InelasticDefgradTransvIsotropElastViscoplast::
       lngi_precondition_matrices_(matdata.parameters.get<bool>("LNGI_PRECONDITION_MATRICES")),
       lngi_precondition_matrices_num_tol_(
           matdata.parameters.get<double>("LNGI_PRECONDITION_MATRICES_NUM_TOL")),
-      lngi_check_consistency_(matdata.parameters.get<bool>("LNGI_CHECK_CONSISTENCY")),
       use_steepest_descent_update_correction_(
           matdata.parameters.get<bool>("USE_STEEPEST_DESCENT_UPDATE_CORRECTION")),
       use_line_search_(matdata.parameters.get<bool>("USE_LINE_SEARCH")),
@@ -878,13 +834,7 @@ Mat::PAR::InelasticDefgradTransvIsotropElastViscoplast::
       local_newton_conv_check_(
           matdata.parameters.get<LocalNewtonConvCheck>("LOCAL_NEWTON_CONV_CHECK")),
       local_newton_diver_cont_(
-          matdata.parameters.get<LocalNewtonDiverCont>("LOCAL_NEWTON_DIVER_CONT")),
-      use_csv_output_failed_local_newton_iter_(
-          matdata.parameters.get<bool>("USE_CSV_OUTPUT_FAILED_LOCAL_NEWTON_ITER")),
-      use_csv_output_lngi_micro_iter_(
-          matdata.parameters.get<bool>("USE_CSV_OUTPUT_LNGI_MICRO_ITER")),
-      use_csv_output_line_search_micro_iter_(
-          matdata.parameters.get<bool>("USE_CSV_OUTPUT_LINE_SEARCH_MICRO_ITER"))
+          matdata.parameters.get<LocalNewtonDiverCont>("LOCAL_NEWTON_DIVER_CONT"))
 {
   // consistency checks
   if (max_substepping_halve_num_ < 0) FOUR_C_THROW("Parameter MAX_HALVE_NUM_SUBSTEP must be >= 0!");
@@ -1890,10 +1840,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::InelasticDefgradTransvIsotrop
           parameter()->lngi_plastic_pred_elastic_stretch_eigenval_type(),
           parameter()->lngi_plastic_pred_elastic_stretch_eigenvect_rot_type(),
           parameter()->lngi_plastic_pred_rot_type(), parameter()->lngi_min_interp_interval()),
-      globiter_(-1),  // initialized as -1, because this is called one time even
-                      // prior to the first global predictor evaluation
-      csv_output_lngi_micro_iter_data_{CSVOutputTrackingData{}},
-      csv_output_line_search_micro_iter_data_{CSVOutputTrackingData{}},
       lnl_data_(parameter()->local_newton_res_tol(), parameter()->local_newton_incr_tol(),
           parameter()->local_newton_conv_check(), parameter()->local_newton_diver_cont())
 {
@@ -2021,10 +1967,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::prepare_return_mapping(
   }
   // set LNL iteration to 0
   lnl_data_.iter_ = 0;
-
-  // Increment the global iteration here (only for first GP, we don't want to do this for
-  // each GP). We assume that this method is only called in new global iterations!
-  if (gp_ == 0) ++globiter_;
 }
 
 /*--------------------------------------------------------------------*
@@ -3023,9 +2965,6 @@ Core::LinAlg::Matrix<3, 3> Mat::InelasticDefgradTransvIsotropElastViscoplast::re
  *--------------------------------------------------------------------*/
 void Mat::InelasticDefgradTransvIsotropElastViscoplast::update()
 {
-  // reset global iteration tracker
-  globiter_ = 0;
-
   // loop over Gauss points to store relevant data last_ <- current_ (plastic strain incremements,
   // data related to elastic and plastic predictors for LNGI, ...)
   ErrorType err_status = InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors;
@@ -3279,20 +3218,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::determine_lngi_starting_
           const LocalNewtonGuessInterpolation::PredictorDefgradDecomposition& pred_defgrad_decomp =
               lnl_guess_interpolation_.get_last_pred_decomp_specific_defgrad()[gp];
 
-          // DEBUG
-          if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-          {
-            std::cout << "Current predictor defgrad decomposition: " << std::endl;
-            const LocalNewtonGuessInterpolation::PredictorDefgradDecomposition&
-                debug_curr_pred_defgrad_decomp =
-                    lnl_guess_interpolation_.get_curr_pred_decomp_specific_defgrad()[gp];
-            debug_curr_pred_defgrad_decomp.print(std::cout);
-            std::cout << "Previous predictor defgrad decomposition: " << std::endl;
-            pred_defgrad_decomp.print(std::cout);
-          }
-
-
-
           if (parameter()->lngi_precondition_matrices())
           {
             lnl_guess_interpolation_.set_optimal_interp_point(
@@ -3414,9 +3339,7 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::determine_lngi_starting_
 void Mat::InelasticDefgradTransvIsotropElastViscoplast::prepare_lngi(
     const Core::LinAlg::Matrix<3, 3>& defgrad)
 {
-  // numerical tolerance
-  const double numerical_tol = 1.0e-10;
-
+  // determine LNGI starting points for all GP to be used subsequently
   determine_lngi_starting_points();
 
   // get inverse plastic deformation gradient within the plastic predictor
@@ -3427,133 +3350,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::prepare_lngi(
           parameter()->lngi_plastic_pred_elastic_stretch_eigenval_type(),
           parameter()->lngi_plastic_pred_elastic_stretch_eigenvect_rot_type(),
           parameter()->lngi_plastic_pred_rot_type());
-
-
-  // consistency check:
-  if (parameter()->lngi_check_consistency())
-  {
-    // compute elastic deformation gradient within the plastic predictor, along with its combined
-    // polar and spectral decompositions
-    Core::LinAlg::Matrix<3, 3> elastic_defgrad_plast_pred{Core::LinAlg::Initialization::zero};
-    elastic_defgrad_plast_pred.multiply_nn(1.0, defgrad, inv_plastic_defgrad_plastic_pred, 0.0);
-    Core::LinAlg::Matrix<3, 3> R_elastic_defgrad_plast_pred{Core::LinAlg::Initialization::zero};
-    Core::LinAlg::Matrix<3, 3> U_elastic_defgrad_plast_pred{Core::LinAlg::Initialization::zero};
-    Core::LinAlg::Matrix<3, 3> lambda_elastic_defgrad_plast_pred{
-        Core::LinAlg::Initialization::zero};
-    std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>
-        spectral_pairs_elastic_defgrad_plast_pred;
-    Core::LinAlg::matrix_3x3_polar_decomposition(elastic_defgrad_plast_pred,
-        R_elastic_defgrad_plast_pred, U_elastic_defgrad_plast_pred,
-        lambda_elastic_defgrad_plast_pred, spectral_pairs_elastic_defgrad_plast_pred);
-    Core::LinAlg::Matrix<3, 3> Q_elastic_defgrad_plast_pred{Core::LinAlg::Initialization::zero};
-    Core::LinAlg::Matrix<3, 1> q{Core::LinAlg::Initialization::zero};
-    for (int i = 0; i < 3; ++i)
-    {
-      q = spectral_pairs_elastic_defgrad_plast_pred[i].second;
-      for (int j = 0; j < 3; ++j)
-      {
-        Q_elastic_defgrad_plast_pred(i, j) = q(j);
-      }
-    }
-
-
-    // compute elastic deformation gradient within the elastic predictor, along with its combined
-    // polar and spectral decompositions
-
-    Core::LinAlg::Matrix<3, 3> elastic_defgrad_elast_pred{Core::LinAlg::Initialization::zero};
-    elastic_defgrad_elast_pred.multiply_nn(
-        1.0, defgrad, time_step_quantities_.last_plastic_defgrad_inverse_[gp_], 0.0);
-    Core::LinAlg::Matrix<3, 3> R_elastic_defgrad_elast_pred{Core::LinAlg::Initialization::zero};
-    Core::LinAlg::Matrix<3, 3> U_elastic_defgrad_elast_pred{Core::LinAlg::Initialization::zero};
-    Core::LinAlg::Matrix<3, 3> lambda_elastic_defgrad_elast_pred{
-        Core::LinAlg::Initialization::zero};
-    std::array<std::pair<double, Core::LinAlg::Matrix<3, 1>>, 3>
-        spectral_pairs_elastic_defgrad_elast_pred;
-    Core::LinAlg::matrix_3x3_polar_decomposition(elastic_defgrad_elast_pred,
-        R_elastic_defgrad_elast_pred, U_elastic_defgrad_elast_pred,
-        lambda_elastic_defgrad_elast_pred, spectral_pairs_elastic_defgrad_elast_pred);
-    Core::LinAlg::Matrix<3, 3> Q_elastic_defgrad_elast_pred{Core::LinAlg::Initialization::zero};
-    for (int i = 0; i < 3; ++i)
-    {
-      q = spectral_pairs_elastic_defgrad_elast_pred[i].second;
-      for (int j = 0; j < 3; ++j)
-      {
-        Q_elastic_defgrad_elast_pred(i, j) = q(j);
-      }
-    }
-
-
-    if (parameter()->lngi_plastic_pred_elastic_stretch_eigenvect_rot_type() ==
-            InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonGuessInterpolation::
-                PlasticPredictorElasticStretchEigenvectRotType::elastic_predictor &&
-        parameter()->lngi_plastic_pred_rot_type() ==
-            InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonGuessInterpolation::
-                PlasticPredictorRotationType::elastic_predictor)
-    {
-      // reference elastic stretch eigenvalues
-      Core::LinAlg::Matrix<3, 3> ref_lambda_elastic_defgrad{Core::LinAlg::Initialization::zero};
-      switch (parameter()->lngi_plastic_pred_elastic_stretch_eigenval_type())
-      {
-        case InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonGuessInterpolation::
-            PlasticPredictorElasticStretchEigenvalType::eliminate:
-        {
-          for (int i = 0; i < 3; ++i)
-          {
-            ref_lambda_elastic_defgrad(i, i) = 1.0;
-          }
-          break;
-        }
-        case InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonGuessInterpolation::
-            PlasticPredictorElasticStretchEigenvalType::maintain:
-        {
-          for (int i = 0; i < 3; ++i)
-          {
-            ref_lambda_elastic_defgrad(i, i) =
-                time_step_quantities_.last_elastic_stretch_eigenval_[gp_][i];
-          }
-          break;
-        }
-        default:
-        {
-          FOUR_C_THROW(
-              "You should not be here in the consistency check! Incompatible elastic stretch "
-              "eigenvalue type {}",
-              EnumTools::enum_name(parameter()->lngi_plastic_pred_elastic_stretch_eigenval_type()));
-        }
-      }
-      const double temp_det = ref_lambda_elastic_defgrad.determinant();
-      ref_lambda_elastic_defgrad.scale(std::pow(defgrad.determinant() / temp_det, 1.0 / 3.0));
-
-
-      // reference elastic deformation gradient to check against
-      Core::LinAlg::Matrix<3, 3> ref_elastic_defgrad{Core::LinAlg::Initialization::zero};
-      Core::LinAlg::Matrix<3, 3> ref_QTLambda{Core::LinAlg::Initialization::zero};
-      ref_QTLambda.multiply_tn(1.0, Q_elastic_defgrad_elast_pred, ref_lambda_elastic_defgrad, 0.0);
-      Core::LinAlg::Matrix<3, 3> ref_QTLambdaQ{Core::LinAlg::Initialization::zero};
-      ref_QTLambdaQ.multiply_nn(1.0, ref_QTLambda, Q_elastic_defgrad_elast_pred, 0.0);
-      ref_elastic_defgrad.multiply_nn(1.0, R_elastic_defgrad_elast_pred, ref_QTLambdaQ, 0.0);
-
-
-      // calculate difference between reference elastic deformation gradient and elastic
-      // deformation gradient within the plastic predictor
-      Core::LinAlg::Matrix<3, 3> delta_elastic_defgrad{Core::LinAlg::Initialization::zero};
-      delta_elastic_defgrad.update(1.0, elastic_defgrad_plast_pred, -1.0, ref_elastic_defgrad, 0.0);
-
-      if (delta_elastic_defgrad.norm2() > numerical_tol)
-      {
-        std::cout << "Difference of elastic defgrad (plastic predictor) wrt to reference value "
-                     "(consistency "
-                     "check) is "
-                  << delta_elastic_defgrad.norm2() << " > " << numerical_tol
-                  << " (numerical tolerance)!" << std::endl;
-        std::cout << "plastic_pred: " << std::endl;
-        elastic_defgrad_plast_pred.print(std::cout);
-        std::cout << "reference: " << std::endl;
-        ref_elastic_defgrad.print(std::cout);
-        FOUR_C_THROW("Stop");
-      }
-    }
-  }
 
   // preevaluate Local Newton Guess Interpolation factors for the initial plastic predictor
   if (parameter()->lngi_precondition_matrices())
@@ -3575,81 +3371,7 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::prepare_lngi(
         defgrad);
   }
 
-  // consistency check: can we recover the inverse plastic deformation
-  // gradient within the plastic predictor from its extract spectral-polar decomposed
-  // parts?
-  if (parameter()->lngi_check_consistency())
-  {
-    const LocalNewtonGuessInterpolation::PredictorDefgradDecomposition&
-        curr_pred_decomp_specific_defgrad =
-            lnl_guess_interpolation_.get_curr_pred_decomp_specific_defgrad()[gp_];
-
-    // compute input matrix from its components
-    Core::LinAlg::Matrix<3, 3> recovered_matrix = compute_matrix_from_decomposed_components(
-        lnl_guess_interpolation_.get_curr_pred_decomp_specific_defgrad()[gp_].lambda_plast_pred_[0],
-        curr_pred_decomp_specific_defgrad.lambda_plast_pred_[1],
-        curr_pred_decomp_specific_defgrad.lambda_plast_pred_[2],
-        curr_pred_decomp_specific_defgrad.Qmat_elast_pred_,
-        curr_pred_decomp_specific_defgrad.Qvec_plast_pred_rel_,
-        curr_pred_decomp_specific_defgrad.Rmat_plast_pred_);
-    // verify inverse inelastic deformation gradient
-    Core::LinAlg::Matrix<3, 3> recovered_inv_plastic_defgrad{Core::LinAlg::Initialization::zero};
-    if (lnl_guess_interpolation_.get_defgrad_type() ==
-        InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonGuessInterpolation::
-            DefgradType::elastic_defgrad)
-    {
-      // inverse defgrad
-      Core::LinAlg::Matrix<3, 3> inv_defgrad{Core::LinAlg::Initialization::zero};
-      inv_defgrad.invert(defgrad);
-
-      // compute recovered inverse plastic defgrad
-      recovered_inv_plastic_defgrad.multiply_nn(1.0, inv_defgrad, recovered_matrix, 0.0);
-    }
-    else if (lnl_guess_interpolation_.get_defgrad_type() ==
-             InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonGuessInterpolation::
-                 DefgradType::inv_plastic_defgrad)
-    {
-      recovered_inv_plastic_defgrad = recovered_matrix;
-    }
-    else
-    {
-      FOUR_C_THROW("Unsupported deformation gradient type {} for interpolation",
-          lnl_guess_interpolation_.get_defgrad_type());
-    }
-
-
-    // compute difference between input matrix and the recovered
-    // matrix
-    Core::LinAlg::Matrix<3, 3> delta_input_matrix{Core::LinAlg::Initialization::zero};
-    delta_input_matrix.update(
-        1.0, inv_plastic_defgrad_plastic_pred, -1.0, recovered_inv_plastic_defgrad, 0.0);
-
-    // verify the recovered matrix
-    if (delta_input_matrix.norm2() > numerical_tol)
-    {
-      std::cout << "The determined inverse inelastic deformation gradient within the plastic "
-                   "predictor cannot be recovered!"
-                << std::endl;
-      std::cout << "determined: " << std::endl;
-      inv_plastic_defgrad_plastic_pred.print(std::cout);
-      std::cout << "recovered: " << std::endl;
-      recovered_inv_plastic_defgrad.print(std::cout);
-      std::cout << "eigenvalues: " << std::endl;
-      std::cout << curr_pred_decomp_specific_defgrad.lambda_plast_pred_[0] << ", "
-                << curr_pred_decomp_specific_defgrad.lambda_plast_pred_[1] << ", "
-                << curr_pred_decomp_specific_defgrad.lambda_plast_pred_[2] << std::endl;
-      std::cout << "eigenvector matrix (elastic predictor): " << std::endl;
-      curr_pred_decomp_specific_defgrad.Qmat_elast_pred_.print(std::cout);
-      std::cout << "relative eigenvector rotation (wrt elastic predictor): " << std::endl;
-      curr_pred_decomp_specific_defgrad.Qvec_plast_pred_rel_.print(std::cout);
-      std::cout << "rotation matrix: " << std::endl;
-      curr_pred_decomp_specific_defgrad.Rmat_plast_pred_.print(std::cout);
-      FOUR_C_THROW("Failed consistency check for Local Newton Guess Interpolation");
-    }
-  }
-
-
-  // TODO: routine for determining exact plastic predictor (yield surface);
+  // routine for determining exact plastic predictor (yield surface);
   // evaluate the states associated with both predictors
   ErrorType err_status{ErrorType::no_errors};
   Core::LinAlg::Matrix<3, 3> right_cg{Core::LinAlg::Initialization::zero};
@@ -3685,25 +3407,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::prepare_lngi(
 
 
 
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-  {
-    std::cout << std::string(50, '-') << std::endl;
-    std::cout << "elastic_defgrad_elast_pred: " << std::endl;
-    Core::LinAlg::Matrix<3, 3> elastic_defgrad_elast_pred{Core::LinAlg::Initialization::zero};
-    elastic_defgrad_elast_pred.multiply_nn(
-        1.0, defgrad, time_step_quantities_.last_plastic_defgrad_inverse_[gp_], 0.0);
-    elastic_defgrad_elast_pred.print(std::cout);
-    std::cout << "plastic_strain_increment_elast_pred: " << plastic_strain_increment_elast_pred
-              << std::endl;
-    Core::LinAlg::Matrix<3, 3> elastic_defgrad_plast_pred{Core::LinAlg::Initialization::zero};
-    elastic_defgrad_plast_pred.multiply_nn(1.0, defgrad, inv_plastic_defgrad_plastic_pred, 0.0);
-    elastic_defgrad_plast_pred.print(std::cout);
-    std::cout << "plastic_strain_increment_plast_pred: " << plastic_strain_increment_plast_pred
-              << std::endl;
-  }
-
-
   // based on the plastic strain increment: determine whether to update the plastic predictor, or to
   // directly use the elastic predictor (if its plastic strain increment is already small)
   if (plastic_strain_increment_elast_pred <= ref_plastic_strain_increment)
@@ -3718,56 +3421,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::prepare_lngi(
     {
       determine_updated_plastic_predictor_lngi(defgrad);
       use_elastic_predictor_ = false;
-
-
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-      {
-        std::cout << std::string(50, '.') << std::endl;
-        std::cout << "...after updated plastic predictor..." << std::endl;
-        std::cout << "updated_elastic_defgrad_elast_pred: " << std::endl;
-        Core::LinAlg::Matrix<3, 3> elastic_defgrad_elast_pred{Core::LinAlg::Initialization::zero};
-        Core::LinAlg::Matrix<3, 3> inv_defgrad{Core::LinAlg::Initialization::zero};
-        inv_defgrad.invert(defgrad);
-        Core::LinAlg::Matrix<3, 3> updated_inv_plastic_defgrad_elast_pred =
-            lnl_guess_interpolation_.interpolate_inv_plastic_defgrad(gp_, defgrad,
-                LocalNewtonGuessInterpolation::InterpolationPoint{.xi_lambda_1_ = 0.0,
-                    .xi_lambda_2_ = 0.0,
-                    .xi_rel_eigenvect_rot_ = {0.0, 0.0, 0.0}},
-                inv_defgrad);
-        elastic_defgrad_elast_pred.multiply_nn(
-            1.0, defgrad, updated_inv_plastic_defgrad_elast_pred, 0.0);
-        elastic_defgrad_elast_pred.print(std::cout);
-        StateQuantities state_quantities_updated_elastic_pred = evaluate_state_quantities(right_cg,
-            updated_inv_plastic_defgrad_elast_pred, time_step_quantities_.last_plastic_strain_[gp_],
-            err_status, time_step_tracker_.dt_, StateQuantityEvalType::PlasticStrainRateOnly);
-        const double plastic_strain_increment_updated_elast_pred =
-            std::abs(state_quantities_updated_elastic_pred.curr_equiv_plastic_strain_rate_ *
-                     time_step_tracker_.dt_);
-        std::cout << "updated_plastic_strain_increment_elast_pred: "
-                  << plastic_strain_increment_updated_elast_pred << std::endl;
-
-        std::cout << "updated_elastic_defgrad_plast_pred: " << std::endl;
-        Core::LinAlg::Matrix<3, 3> elastic_defgrad_plast_pred{Core::LinAlg::Initialization::zero};
-        Core::LinAlg::Matrix<3, 3> updated_inv_plastic_defgrad_plast_pred =
-            lnl_guess_interpolation_.interpolate_inv_plastic_defgrad(gp_, defgrad,
-                LocalNewtonGuessInterpolation::InterpolationPoint{.xi_lambda_1_ = 1.0,
-                    .xi_lambda_2_ = 1.0,
-                    .xi_rel_eigenvect_rot_ = {1.0, 1.0, 1.0}},
-                inv_defgrad);
-        elastic_defgrad_plast_pred.multiply_nn(
-            1.0, defgrad, updated_inv_plastic_defgrad_plast_pred, 0.0);
-        elastic_defgrad_plast_pred.print(std::cout);
-        StateQuantities state_quantities_updated_plastic_pred = evaluate_state_quantities(right_cg,
-            updated_inv_plastic_defgrad_plast_pred, time_step_quantities_.last_plastic_strain_[gp_],
-            err_status, time_step_tracker_.dt_, StateQuantityEvalType::PlasticStrainRateOnly);
-        const double plastic_strain_increment_updated_plast_pred =
-            std::abs(state_quantities_updated_plastic_pred.curr_equiv_plastic_strain_rate_ *
-                     time_step_tracker_.dt_);
-
-        std::cout << "updated_plastic_strain_increment_plast_pred: "
-                  << plastic_strain_increment_updated_plast_pred << std::endl;
-      }
     }
   }
 }
@@ -3919,12 +3572,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::determine_updated_plasti
     curr_interp_point =
         LocalNewtonGuessInterpolation::add_interpolation_points(1.0 - k_scan_plastic_pred,
             lower_bound_interp_point, k_scan_plastic_pred, upper_bound_interp_point);
-  }
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-  {
-    std::cout << "--> iterations required for updating plastic predictor: "
-              << lngi_plastic_pred_iters << std::endl;
   }
 }
 
@@ -4106,9 +3753,6 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::unpack_inelastic(
 
   // set control variable of the LNGI update
   compute_lngi_starting_points_ = true;
-
-  // set global iteration number to its initial value (as in the setup method)
-  globiter_ = -1;
 }
 
 
@@ -4464,74 +4108,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
           time_step_quantities_.last_substep_plastic_strain_[gp_],
           local_substepping_utils_.curr_dt_, err_status);
 
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_lnl)
-      {
-        std::cout << "LNL ITER: " << lnl_data_.iter_ << " / " << lnl_data_.max_iter_ << std::endl;
-        std::cout << "x: " << std::endl;
-        sol.print(std::cout);
-        LocalNewtonGuessInterpolation::InterpolationPoint interp_point_lower =
-            lnl_guess_interpolation_.get_lower_bound_interp_point(gp_);
-        LocalNewtonGuessInterpolation::InterpolationPoint interp_point_upper =
-            lnl_guess_interpolation_.get_upper_bound_interp_point(gp_);
-        LocalNewtonGuessInterpolation::InterpolationPoint curr_interp_point =
-            lnl_guess_interpolation_.get_curr_interp_point(gp_);
-
-
-        std::cout << "pred: interp_factor xi (lambda_1): " << interp_point_lower.xi_lambda_1_
-                  << " <= " << curr_interp_point.xi_lambda_1_
-                  << " <= " << interp_point_upper.xi_lambda_1_ << std::endl;
-        std::cout << "residual evaluation status:  " << EnumTools::enum_name(err_status)
-                  << std::endl;
-        if (err_status == InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors)
-        {
-          std::cout << "residual: " << residual.norm2() << std::endl;
-          std::cout << "increment: " << alpha * dx.norm2() / sol.norm2() << std::endl;
-        }
-      }
-
-
-      // based on the residual evaluation: communicate status and values
-      // to the LNL data tracker
-      if (err_status == InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors)
-      {
-        // LNL data: successful evaluation
-        lnl_data_.set_iteration_data(
-            CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-                .gp_ = gp_,
-                .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-                .tnp_ = time_step_tracker_.tnp_,
-                .globiter_ = globiter_,
-                .lnl_iter_ =
-                    lnl_data_.iter_ - 1},  // subtract 1 to match the current loop structure
-                                           // updating the iteration count at the beginning
-            LocalNewtonData::LocalIterDataCollector{
-                .iter_status_ = LocalIterationStatus::residual_evaluation_successful,
-                .residual_ = residualNorm2,
-                .equiv_stress_ = state_quantities_.curr_equiv_stress_,
-                .plastic_strain_ = sol(9),
-                .interp_param_ = lnl_guess_interpolation_.get_curr_interp_point(gp_).xi_lambda_1_});
-      }
-      else
-      {
-        // LNL data: failed evaluation
-        lnl_data_.set_iteration_data(
-            CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-                .gp_ = gp_,
-                .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-                .tnp_ = time_step_tracker_.tnp_,
-                .globiter_ = globiter_,
-                .lnl_iter_ =
-                    lnl_data_.iter_ - 1},  // subtract 1 to match the current loop structure
-                                           // updating the iteration count at the beginning
-            LocalNewtonData::LocalIterDataCollector{
-                .iter_status_ = LocalIterationStatus::residual_evaluation_failed,
-                .residual_ = -1.0,
-                .equiv_stress_ = state_quantities_.curr_equiv_stress_,
-                .plastic_strain_ = sol(9),
-                .interp_param_ = lnl_guess_interpolation_.get_curr_interp_point(gp_).xi_lambda_1_});
-      }
-
       // no errors: compute relevant 2-norms: residual and increment; also: check for
       // "stuck" Local Newton
       if (err_status == InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_errors)
@@ -4542,12 +4118,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
         // 2-norm of the solution increment
         rel_sol_incr_norm = alpha * dx.norm2() / sol.norm2();
 
-
-        // DEBUG
-        if (debug_mode(ele_gid_, gp_) && debug_lnl)
-        {
-          std::cout << "residual: " << residualNorm2 << std::endl;
-        }
 
         // check for "stuck" Local Newton (check only feasible after the first
         // iteration)
@@ -4583,34 +4153,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
       err_action = manage_evaluation_error(err_status, sol, curr_CM);
       if (err_action == ErrorAction::return_solution_with_errors)
       {
-        // LNL data: nothing do be done anymore, final error
-        lnl_data_.set_iteration_data(
-            CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-                .gp_ = gp_,
-                .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-                .tnp_ = time_step_tracker_.tnp_,
-                .globiter_ = globiter_,
-                .lnl_iter_ =
-                    lnl_data_.iter_ - 1},  // subtract 1 to match the current loop structure
-                                           // updating the iteration count at the beginning
-            LocalNewtonData::LocalIterDataCollector{
-                .iter_status_ = LocalIterationStatus::final_error,
-                .residual_ = -1.0,
-                .equiv_stress_ = state_quantities_.curr_equiv_stress_,
-                .plastic_strain_ = sol(9),
-                .interp_param_ = lnl_guess_interpolation_.get_curr_interp_point(gp_).xi_lambda_1_});
-
-
-        // write the data of the failed LNL to csv
-        if (parameter()->use_csv_output_failed_local_newton_iter())
-          lnl_data_.write_failed_lnl_iteration_data_to_csv(
-              CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-                  .gp_ = gp_,
-                  .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-                  .tnp_ = time_step_tracker_.tnp_,
-                  .globiter_ = globiter_,
-                  .lnl_iter_ = lnl_data_.iter_ - 1});
-
         // return bad solution
         return sol;
       }
@@ -4700,18 +4242,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
               continue;
             }
 
-
-            // write the data of the failed LNL to csv
-            if (parameter()->use_csv_output_failed_local_newton_iter())
-              lnl_data_.write_failed_lnl_iteration_data_to_csv(
-                  CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-                      .gp_ = gp_,
-                      .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-                      .tnp_ = time_step_tracker_.tnp_,
-                      .globiter_ = globiter_,
-                      .lnl_iter_ = lnl_data_.iter_ - 1});
-
-
             // if no substepping is applied: then we have nor converged,
             // return with error
             err_status = ErrorType::no_convergence_local_newton;
@@ -4724,17 +4254,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
           case FourC::Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonDiverCont::
               ContinueWithSafeGuard:
           {
-            // write the data of the failed LNL to csv
-            if (parameter()->use_csv_output_failed_local_newton_iter())
-              lnl_data_.write_failed_lnl_iteration_data_to_csv(
-                  CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-                      .gp_ = gp_,
-                      .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-                      .tnp_ = time_step_tracker_.tnp_,
-                      .globiter_ = globiter_,
-                      .lnl_iter_ = lnl_data_.iter_ - 1});
-
-
             // throw warning
             std::cout << "WARNING: The Local Newton Loop for ele_gid = " << ele_gid_
                       << ", gp = " << gp_ << " did not reach convergence after "
@@ -4935,23 +4454,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
     }
   }
 
-  // append LNL data (for the successful last iteration)
-  lnl_data_.set_iteration_data(
-      CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-          .gp_ = gp_,
-          .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-          .tnp_ = time_step_tracker_.tnp_,
-          .globiter_ = globiter_,
-          .lnl_iter_ = lnl_data_.iter_ - 1},  // subtract 1 to match the current loop structure
-                                              // updating the iteration count at the beginning
-      LocalNewtonData::LocalIterDataCollector{.iter_status_ = LocalIterationStatus::converged,
-          .residual_ = -1.0,
-          .equiv_stress_ = state_quantities_.curr_equiv_stress_,
-          .plastic_strain_ = sol(9),
-          .interp_param_ = lnl_guess_interpolation_.get_curr_interp_point(gp_).xi_lambda_1_});
-
-
-
   // return the obtained solution
   return sol;
 }
@@ -4965,25 +4467,6 @@ bool Mat::InelasticDefgradTransvIsotropElastViscoplast::check_elastic_predictor(
   // evaluate state with this elastic predictor and the minimum possible time step
   state_quantities_ = evaluate_state_quantities(CM, iFinM_pred, plastic_strain_pred, err_status,
       time_step_tracker_.min_dt_, StateQuantityEvalType::PlasticStrainRateOnly);
-
-
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_lnl)
-  {
-    std::cout << "Checking elastic predictor: " << std::endl;
-    std::cout << "CM: " << std::endl;
-    CM.print(std::cout);
-    std::cout << "iFinM: " << std::endl;
-    iFinM_pred.print(std::cout);
-    std::cout << "plastic_strain: " << std::endl;
-    std::cout << plastic_strain_pred << std::endl;
-    std::cout << "--> equiv_stress: " << state_quantities_.curr_equiv_stress_
-              << "; plastic_strain_rate: " << state_quantities_.curr_equiv_plastic_strain_rate_
-              << "; elastic predictor = sol: "
-              << std::to_string((state_quantities_.curr_equiv_plastic_strain_rate_ < 1.0e-15))
-              << std::endl;
-  }
-
 
 
   // check if the predicted plastic strain rate is 0 -> for flow rules with yield functions,
@@ -5132,28 +4615,6 @@ Core::LinAlg::Matrix<10, 1>
 Mat::InelasticDefgradTransvIsotropElastViscoplast::interpolate_local_newton_guess(
     const Core::LinAlg::Matrix<3, 3>& FM)
 {
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-  {
-    std::cout << "LNGI num " << lnl_guess_interpolation_.num_of_lngi_ << " for ele_gid_ "
-              << ele_gid_ << " and gp " << gp_ << std::endl;
-  }
-
-  // csv runtime output
-  if (parameter()->use_csv_output_lngi_micro_iter())
-  {
-    // initialize micro iteration data for all microiterations
-    // of the subsequent Local Newton Guess Interpolation, to be written to csv
-    csv_output_lngi_micro_iter_data_ =
-        CSVOutputPredAdaptMicroIterData{CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-            .gp_ = gp_,
-            .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-            .tnp_ = time_step_tracker_.tnp_,
-            .globiter_ = globiter_,
-            .lnl_iter_ = lnl_data_.iter_}};
-  }
-
-
   // compute right CG tensor
   Core::LinAlg::Matrix<3, 3> CM{Core::LinAlg::Initialization::zero};
   CM.multiply_tn(1.0, FM, FM, 0.0);
@@ -5189,10 +4650,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::interpolate_local_newton_gues
     // check whether interpolation is still possible
     if (!lnl_guess_interpolation_.is_interpolation_possible(gp_, lngi_step_counter))
     {
-      // write micro iteration data to csv
-      if (parameter()->use_csv_output_lngi_micro_iter())
-        csv_output_lngi_micro_iter_data_.write_lngi_micro_iter_data_to_csv();
-
       std::cout << debug_get_error_info("Could not determine an initial guess!") << std::endl;
       FOUR_C_THROW("See above");
     }
@@ -5221,12 +4678,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::interpolate_local_newton_gues
     StateQuantities state_quantities_stress = evaluate_state_quantities(CM, iFin_adapt_pred, 0.0,
         err_status, time_step_tracker_.dt_, StateQuantityEvalType::EquivStressOnly);
 
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-    {
-      std::cout << "...integrating plastic strain..." << std::endl;
-    }
-
     // solve for the updated plastic strain (integrate evolution
     // equation with the adapted plastic deformation gradient)
     plastic_strain_adapt_pred = integrate_plastic_strain(state_quantities_stress.curr_equiv_stress_,
@@ -5239,47 +4690,10 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::interpolate_local_newton_gues
           plastic_strain_adapt_pred, err_status, state_quantities_, state_quantity_derivatives_);
     }
 
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-    {
-      std::cout << "ITER:  " << lngi_step_counter << std::endl;
-      std::cout << "curr_interp_point: " << std::endl;
-      lnl_guess_interpolation_.get_curr_interp_point(gp_).print(std::cout);
-      std::cout << "lower_bound_interp_point: " << std::endl;
-      lnl_guess_interpolation_.get_lower_bound_interp_point(gp_).print(std::cout);
-      std::cout << "upper_bound_interp_point: " << std::endl;
-      lnl_guess_interpolation_.get_upper_bound_interp_point(gp_).print(std::cout);
-      std::cout << "equiv_stress:  " << state_quantities_stress.curr_equiv_stress_
-                << ", plastic_strain: " << plastic_strain_adapt_pred
-                << ", plastic_strain_rate: " << state_quantities_.curr_equiv_plastic_strain_rate_
-                << std::endl;
-      std::cout << "err_status: " << EnumTools::enum_name(err_status) << std::endl;
-    }
-
-
-
     // if there was an evaluation error: adapt interpolation interval
     // and the interpolation parameters subsequently
     if (err_status != ErrorType::no_errors)
     {
-      // set micro iteration data for the current evaluation
-      if (parameter()->use_csv_output_lngi_micro_iter())
-      {
-        const LocalNewtonGuessInterpolation::InterpolationPoint curr_interp_point =
-            lnl_guess_interpolation_.get_curr_interp_point(gp_);
-        csv_output_lngi_micro_iter_data_.append_micro_iter_data(
-            {
-                .current_xi_lambda_1_ = curr_interp_point.xi_lambda_1_,
-                .current_xi_lambda_2_ = curr_interp_point.xi_lambda_2_,
-                .current_xi_eigenvect_rot_ = curr_interp_point.xi_rel_eigenvect_rot_,
-                .current_equiv_stress_ = state_quantities_.curr_equiv_stress_,
-                .current_plastic_strain_ = plastic_strain_adapt_pred,
-                .current_error_status_ = err_status,
-            },
-            lngi_step_counter - 1);
-      }
-
-
       // adapt interpolation interval
       lnl_guess_interpolation_.adapt_interpolation_intervals(gp_, err_status);
 
@@ -5325,46 +4739,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::interpolate_local_newton_gues
           lngi_step_counter;
     }
   }
-  // append micro iteration data for the last micro iteration which
-  // was successful
-  if (parameter()->use_csv_output_lngi_micro_iter())
-  {
-    const LocalNewtonGuessInterpolation::InterpolationPoint curr_interp_point =
-        lnl_guess_interpolation_.get_curr_interp_point(gp_);
-    csv_output_lngi_micro_iter_data_.append_micro_iter_data(
-        {
-            .current_xi_lambda_1_ = curr_interp_point.xi_lambda_1_,
-            .current_xi_lambda_2_ = curr_interp_point.xi_lambda_2_,
-            .current_xi_eigenvect_rot_ = curr_interp_point.xi_rel_eigenvect_rot_,
-            .current_equiv_stress_ = state_quantities_.curr_equiv_stress_,
-            .current_plastic_strain_ = plastic_strain_adapt_pred,
-            .current_error_status_ = err_status,
-        },
-        lngi_step_counter - 1);
-  }
-
-  // write micro iteration data to csv
-  if (parameter()->use_csv_output_lngi_micro_iter())
-    csv_output_lngi_micro_iter_data_.write_lngi_micro_iter_data_to_csv();
-
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_pred_adapt)
-  {
-    std::cout << "End LNGI " << lnl_guess_interpolation_.num_of_lngi_ << " for ele_gid_ "
-              << ele_gid_ << " and gp " << gp_ << std::endl;
-    std::cout << "curr_interp_point: " << std::endl;
-    lnl_guess_interpolation_.get_curr_interp_point(gp_).print(std::cout);
-    std::cout << "lower_bound_interp_point: " << std::endl;
-    lnl_guess_interpolation_.get_lower_bound_interp_point(gp_).print(std::cout);
-    std::cout << "upper_bound_interp_point: " << std::endl;
-    lnl_guess_interpolation_.get_upper_bound_interp_point(gp_).print(std::cout);
-    std::cout << "equiv_stress:  " << state_quantities_.curr_equiv_stress_
-              << ", plastic_strain: " << plastic_strain_adapt_pred
-              << ", plastic_strain_rate: " << state_quantities_.curr_equiv_plastic_strain_rate_
-              << std::endl;
-  }
-
-
   // return adapted predictor
   return lnl_guess_interpolation_.guess_inv_plast_defgrad_;
 }
@@ -5413,22 +4787,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::get_line_search_step(
     const Core::LinAlg::Matrix<10, 1>& curr_res, const Core::LinAlg::Matrix<10, 1>& incr,
     ErrorType& err_status)
 {
-  if (parameter()->use_csv_output_line_search_micro_iter())
-  {
-    // initialize micro iteration data for all "micro"
-    // iterations of the subsequent line search, to be written to csv
-    csv_output_line_search_micro_iter_data_ = CSVOutputLineSearchMicroIterData{
-        CSVOutputTrackingData{.ele_gid_ = ele_gid_,
-            .gp_ = gp_,
-            .tn_ = (time_step_tracker_.tnp_ - time_step_tracker_.dt_),
-            .tnp_ = time_step_tracker_.tnp_,
-            .globiter_ = globiter_,
-            .lnl_iter_ = lnl_data_.iter_ - 1}
-        // we subtract 1 from the current local iteration number to start with 0, and
-        // make this consistent with the output of the Local Newton Guess Interpolation
-    };
-  }
-
   // set necessary decrease parameter \f$ \rho \in \left(0, \frac{1}{2}\right) \f$ of the
   // backtracking algorithm
   const double rho = 1.0 / 4.0;
@@ -5458,27 +4816,12 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::get_line_search_step(
     // with an error.
     if (curr_sol(9) == 0.0)
     {
-      // csv runtime output
-      if (parameter()->use_csv_output_line_search_micro_iter())
-      {
-        // append microiteration data
-        csv_output_line_search_micro_iter_data_.append_micro_iter_data(
-            CSVOutputLineSearchMicroIterData::MicroIterDataCollector{}, 0);
-
-        // write microiteration data to csv
-        csv_output_line_search_micro_iter_data_.write_line_search_micro_iter_data_to_csv();
-      }
-
       err_status = ErrorType::failed_determ_line_search_step;
       return -1;
     }
 
     alpha_u = curr_sol(9) / std::abs(incr(9));
   }
-
-
-  // save maximum value of the step size
-  const double max_alpha = alpha_u;
 
   // set our current step size to the maximum step size
   alpha = alpha_u;
@@ -5535,25 +4878,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::get_line_search_step(
       // set error status (determination of line search step has failed)
       err_status = ErrorType::failed_determ_line_search_step;
 
-      // csv runtime output
-      if (parameter()->use_csv_output_line_search_micro_iter())
-      {
-        // set micro iteration data for the current evaluation
-        csv_output_line_search_micro_iter_data_.append_micro_iter_data(
-            {
-                .current_alpha_ = alpha,
-                .max_alpha_ = max_alpha,
-                .current_equiv_stress_ = state_quantities_.curr_equiv_stress_,
-                .current_plastic_strain_ = next_sol(9),
-                .current_quadratic_residual_norm_ = -1,
-                .max_quadratic_residual_norm_ = -1,
-                .current_error_status_ = err_status,
-            },
-            dec_times - 1);
-        // write micro iteration data to csv
-        csv_output_line_search_micro_iter_data_.write_line_search_micro_iter_data_to_csv();
-      }
-
       return -1.0;
     }
 
@@ -5574,43 +4898,11 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::get_line_search_step(
     }
     else
     {
-      // set micro iteration data for the current evaluation
-      if (parameter()->use_csv_output_line_search_micro_iter())
-      {
-        csv_output_line_search_micro_iter_data_.append_micro_iter_data(
-            {
-                .current_alpha_ = alpha,
-                .max_alpha_ = max_alpha,
-                .current_equiv_stress_ = state_quantities_.curr_equiv_stress_,
-                .current_plastic_strain_ = next_sol(9),
-                .current_quadratic_residual_norm_ = -1,
-                .max_quadratic_residual_norm_ = -1,
-                .current_error_status_ = err_status,
-            },
-            dec_times - 1);
-      }
-
       // decrease line search parameter
       alpha *= alpha_dec_fac;
       next_sol.update(1.0, curr_sol, alpha, incr, 0.0);
 
       continue;
-    }
-
-    // set micro iteration data for the current evaluation
-    if (parameter()->use_csv_output_line_search_micro_iter())
-    {
-      csv_output_line_search_micro_iter_data_.append_micro_iter_data(
-          {
-              .current_alpha_ = alpha,
-              .max_alpha_ = max_alpha,
-              .current_equiv_stress_ = state_quantities_.curr_equiv_stress_,
-              .current_plastic_strain_ = next_sol(9),
-              .current_quadratic_residual_norm_ = next_f,
-              .max_quadratic_residual_norm_ = curr_f - 2.0 * rho * alpha * incr_squared,
-              .current_error_status_ = err_status,
-          },
-          dec_times - 1);
     }
 
     // update relative increment norm
@@ -5639,10 +4931,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::get_line_search_step(
       // general local time integration analysis: set number of required iterations
       general_local_timint_analysis_utils.num_iters_and_steps_.eval_num_of_line_search_iters_ +=
           dec_times;
-
-      // write micro iteration data to csv
-      if (parameter()->use_csv_output_line_search_micro_iter())
-        csv_output_line_search_micro_iter_data_.write_line_search_micro_iter_data_to_csv();
 
       err_status = ErrorType::no_errors;
       return alpha;
@@ -5675,15 +4963,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::integrate_plastic_stra
   double residual = 1.0e10;
   double jacobian = 1.0e10;
 
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-  {
-    std::cout << std::string(50, '.') << std::endl;
-    std::cout << "Integrating plastic strain starting from equiv_stress: " << equiv_stress
-              << ", last_plastic_strain: " << last_plastic_strain << "\n";
-  }
-
-
   // Newton-Raphson loop
   while (true)
   {
@@ -5697,15 +4976,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::integrate_plastic_stra
       err_status = ErrorType::overflow_error;
       return -1;
     }
-
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-    {
-      std::cout << "iter: " << iter << " / " << max_iter << "\n";
-      std::cout << "equiv_stress: " << equiv_stress << ", plastic_strain: " << plastic_strain
-                << std::endl;
-    }
-
     // compute plastic strain rate from the viscoplasticity law
     plastic_strain_rate = viscoplastic_law_->evaluate_plastic_strain_rate(
         equiv_stress, plastic_strain, dt, parameter()->max_plastic_strain_incr(), err_status);
@@ -5713,15 +4983,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::integrate_plastic_stra
     // return directly when encountering error
     if (err_status != ErrorType::no_errors)
     {
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-      {
-        std::cout << "plastic strain rate could not be evaluated...-> we return with error status "
-                  << EnumTools::enum_name(err_status) << std::endl;
-      }
-
-
-
       return -1;
     }
 
@@ -5729,24 +4990,9 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::integrate_plastic_stra
     residual = plastic_strain - last_plastic_strain - dt * plastic_strain_rate;
 
 
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-    {
-      std::cout << "residual: " << residual << "\n";
-    }
-
-
-
     // return solution
     if (std::abs(residual) < tol)
     {
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-      {
-        std::cout << std::string(50, '.') << "\n";
-      }
-
-
       return plastic_strain;
     }
 
@@ -5759,14 +5005,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::integrate_plastic_stra
     // throw error
     if (err_status != ErrorType::no_errors)
     {
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-      {
-        std::cout << "Plastic strain rate DERIVS could not be evaluated...->about to return"
-                  << std::endl;
-        std::cout << std::string(50, '.') << "\n";
-      }
-
       return -1;
     }
 
@@ -5775,14 +5013,6 @@ double Mat::InelasticDefgradTransvIsotropElastViscoplast::integrate_plastic_stra
 
     // update solution
     plastic_strain -= residual / jacobian;
-
-
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_integrate_plastic_strain)
-    {
-      std::cout << "jacobian: " << jacobian << std::endl;
-      std::cout << "plastic_strain: " << plastic_strain << std::endl;
-    }
   }
 }
 
@@ -5798,12 +5028,6 @@ ErrorAction Mat::InelasticDefgradTransvIsotropElastViscoplast::manage_evaluation
     return ErrorAction::continue_iteration;
   }
 
-
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_lnl)
-  {
-    std::cout << "manage_evaluation_error: " << EnumTools::enum_name(err_status) << "\n";
-  }
 
   // general local time integration analysis: add error
   if (parameter()->analyze_timint() && general_local_timint_analysis_utils.increment_vars_)
@@ -6273,18 +5497,6 @@ bool Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_output_data(
     }
     return true;
   }
-  else if (name == "plastic_strain_LNL")
-  {
-    for (int gp = 0; gp < static_cast<int>(time_step_quantities_.current_plastic_strain_.size());
-        ++gp)
-    {
-      for (unsigned int it = 0; it < lnl_data_.max_iter_; ++it)
-      {
-        data(gp, it) = lnl_data_.all_plastic_strain_[gp][it];
-      }
-    }
-    return true;
-  }
   else if (name == "equiv_stress")
   {
     for (int gp = 0; gp < static_cast<int>(time_step_quantities_.current_equiv_stress_.size());
@@ -6294,43 +5506,6 @@ bool Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_output_data(
     }
     return true;
   }
-  else if (name == "equiv_stress_LNL")
-  {
-    for (int gp = 0; gp < static_cast<int>(time_step_quantities_.current_plastic_strain_.size());
-        ++gp)
-    {
-      for (unsigned int it = 0; it < lnl_data_.max_iter_; ++it)
-      {
-        data(gp, it) = lnl_data_.all_equiv_stress_[gp][it];
-      }
-    }
-    return true;
-  }
-  else if (name == "iter_status_LNL")
-  {
-    for (int gp = 0; gp < static_cast<int>(time_step_quantities_.current_plastic_strain_.size());
-        ++gp)
-    {
-      for (unsigned int it = 0; it < lnl_data_.max_iter_; ++it)
-      {
-        data(gp, it) = local_iteration_status_enum_to_double(lnl_data_.all_iter_status_[gp][it]);
-      }
-    }
-    return true;
-  }
-  else if (name == "residual_LNL")
-  {
-    for (int gp = 0; gp < static_cast<int>(time_step_quantities_.current_plastic_strain_.size());
-        ++gp)
-    {
-      for (unsigned int it = 0; it < lnl_data_.max_iter_; ++it)
-      {
-        data(gp, it) = lnl_data_.all_residual_[gp][it];
-      }
-    }
-    return true;
-  }
-
   else if (name == "defgrad")
   {
     for (int gp = 0; gp < static_cast<int>(time_step_quantities_.current_defgrad_.size()); ++gp)
@@ -6421,14 +5596,5 @@ bool Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_output_data(
 
   return viscoplastic_law_->evaluate_output_data(name, data);
 }
-
-/*--------------------------------------------------------------------*
- *--------------------------------------------------------------------*/
-void Mat::PAR::InelasticDefgradTransvIsotropElastViscoplast::debug_set_linearization_type(
-    const LinearizationType linearization_type)
-{
-  linearization_type_ = linearization_type;
-}
-
 
 FOUR_C_NAMESPACE_CLOSE

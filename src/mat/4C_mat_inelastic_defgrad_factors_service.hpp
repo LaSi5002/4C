@@ -91,25 +91,6 @@ namespace Mat
     /// convert error type to detailed error message
     std::string get_detailed_error_message_for_error_type(ErrorType err_type);
 
-    /// enum class: success status of single Local Newton Loop
-    /// iterations to be tracked in the analysis utilities
-    enum class LocalIterationStatus
-    {
-      residual_evaluation_successful,  // residual could be evaluated without errors
-      residual_evaluation_failed,      // residual evaluation failed
-      converged,                       // Local Newton loop converged in this iteration
-      not_evaluated,  // the iteration has not yet been evaluated (also the case when a previous
-                      // iteration has already converged)
-      final_error,    // the LNL has finally failed after performing all possible error management
-                      // actions or/and after the maximum number of
-                      // iterations was reached
-    };
-
-    /// convert enum for the success status of single Local
-    /// Newton iterations to double (required for Gauss-Point output,
-    /// which needs to be of type <double>)
-    double local_iteration_status_enum_to_double(const LocalIterationStatus iter_status);
-
     /// enum class for material behavior types
     enum class MatBehavior
     {
@@ -1493,30 +1474,6 @@ namespace Mat
                               ///< equivalent stress has been evaluated
     };
 
-    //! struct holding relevant tracking data when writing to csv
-    //! files
-    struct CSVOutputTrackingData
-    {
-      //! global element id
-      int ele_gid_;
-
-      //! Gauss point index
-      int gp_;
-
-      //! time instant \f$t_{n}\f$
-      double tn_;
-
-      //! time instant \f$t_{n+1}\f$
-      double tnp_;
-
-      //! tracker for the global iteration; should be reset after calling update
-      //! material of the material
-      unsigned int globiter_;
-
-      //! tracker for the local NR iteration
-      unsigned int lnl_iter_;
-    };
-
 
     // enum: strategy in dealing with divergence of the Local Newton Loop
     enum class LocalNewtonConvCheck
@@ -1602,23 +1559,6 @@ namespace Mat
       //! do we have Gauss point output every global iteration?
       bool is_Gauss_point_output_every_global_iter_ = false;
 
-      //! success status of the iteration (can it even evaluate the
-      //! residual?); vector of GP values
-      std::vector<std::array<LocalIterationStatus, max_iter_>> all_iter_status_;
-
-      //! all iteration values of the LNL residual; vector of GP values
-      std::vector<std::array<double, max_iter_>> all_residual_;
-
-      //! all iteration values of the equivalent stress; vector of GP values
-      std::vector<std::array<double, max_iter_>> all_equiv_stress_;
-
-      //! all iteration values of the plastic strain; vector of GP values
-      std::vector<std::array<double, max_iter_>> all_plastic_strain_;
-
-      //! all iteration values of the interpolation parameter \f$ \xi \f$; vector of GP values
-      std::vector<std::array<double, max_iter_>> all_interp_param_;
-
-
       //! number of LNL iterations for the current timestep; vector of GP values
       std::vector<unsigned int> num_iter_curr_timestep_;
 
@@ -1635,214 +1575,10 @@ namespace Mat
       // maybe we need some pack and unpack methods perspectively? If
       // this is to be used consistently in the future...-> would mainly
       // concern the global iteration / time step tracker, but nothing else.
-
-      //! data collector for a single Local Newton iteration
-      struct LocalIterDataCollector
-      {
-        //! success status of the iteration (can it even evaluate the
-        //! residual?); vector of GP values
-        const LocalIterationStatus iter_status_;
-
-        //! residual of the current iteration
-        const double residual_;
-
-        //! equivalent stress of the current iteration
-        const double equiv_stress_;
-
-        //! plastic strain of the current iteration
-        const double plastic_strain_;
-
-        //! interpolation parameter \f$ \xi \f$ of the current iteration
-        const double interp_param_;
-      };
-
-      //! append data for a given iteration (specified via output
-      //! tracking data)
-      void set_iteration_data(const CSVOutputTrackingData csv_output_tracking_data,
-          const LocalIterDataCollector local_iter_data_collector);
-
-      //! write LNL iteration data to csv file, when the LNL fails
-      void write_failed_lnl_iteration_data_to_csv(
-          const CSVOutputTrackingData csv_output_tracking_data);
-    };
-
-    //! struct holding the relevant output data of all
-    //! microiterations of a single Local Newton Guess Interpolation which can be
-    //! written to a csv file
-    struct CSVOutputPredAdaptMicroIterData
-    {
-      /*! @brief Constructor.
-       *
-       * @param[in] csv_output_tracking_data tracking data used to
-       * specify the settings for the csv output.
-       */
-      CSVOutputPredAdaptMicroIterData(const CSVOutputTrackingData csv_output_tracking_data);
-
-      //! data collector for a single micro iteration within the
-      //! Local Newton Guess Interpolation -> used to assign the values at the specific
-      //! microiterations
-      struct MicroIterDataCollector
-      {
-        //! current interpolation factor \f$ \xi_{\lambda_1} \f$ for the
-        //! eigenvalue \f$ \lambda_1 \f$
-        double current_xi_lambda_1_ = -1;
-        //! current interpolation factor \f$ \xi_{\lambda_2} \f$ for the
-        //! eigenvalue \f$ \lambda_2 \f$
-        double current_xi_lambda_2_ = -1;
-        //! current interpolation factor \f$ \xi_{\boldsymbol{Q}} \f$ for the
-        //! rotation vector associated with the eigenvector (rotation) matrix \f$ \boldsymbol{Q}
-        //! \f$
-        std::array<double, 3> current_xi_eigenvect_rot_{-1.0, -1.0, -1.0};
-        //! current equivalent stress
-        double current_equiv_stress_ = -1;
-        //! current plastic strain
-        double current_plastic_strain_ = -1;
-        //! current error status
-        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType current_error_status_ =
-            ErrorType::overflow_error;
-      };
-
-      //! all indices of the microiterations (iterations within the Local Newton
-      //! Guess Interpolation)
-      std::vector<unsigned int> all_microiter_;
-
-      //! current interpolation factors \f$ \xi_{\lambda_1} \f$ for
-      //! eigenvalue \f$ \lambda_1 \f$ of all
-      //! microiterations
-      std::vector<double> all_current_xi_lambda_1_;
-
-      //! current interpolation factors \f$ \xi_{\lambda_2} \f$ for
-      //! eigenvalue \f$ \lambda_2 \f$ of all
-      //! microiterations
-      std::vector<double> all_current_xi_lambda_2_;
-
-      //! current interpolation factors \f$ \xi_{\boldsymbol{Q}} \f$ for
-      //! the rotation vector associated with the eigenvalue (rotation) matrix \f$ \boldsymbol{Q}
-      //! \f$ of all microiterations
-      std::vector<std::array<double, 3>> all_current_xi_eigenvect_rot_;
-
-      //! current equivalent stresses of all microiterations (associated
-      //! with the current interpolation factors)
-      std::vector<double> all_current_equiv_stress_;
-
-      //! current plastic strains of all microiterations (associated
-      //! with the current interpolation factors)
-      std::vector<double> all_current_plastic_strain_;
-
-      //! current error status of all microiterations (associated with
-      //! the current interpolation factors)
-      std::vector<ErrorType> all_current_error_status_;
-
-      //! tracking data used to specify the settings for csv output
-      CSVOutputTrackingData csv_output_tracking_data_;
-
-      //! append collected data for specific microiteration
-      void append_micro_iter_data(
-          const MicroIterDataCollector mi_data_collector, const unsigned micro_iter);
-
-      //! writes data from each microiteration of a single Local Newton Guess Interpolation
-      //! (specified via tracking data) to a dedicated csv file
-      void write_lngi_micro_iter_data_to_csv();
-    };
-
-    //! struct holding the relevant output data of all
-    //! microiterations of a single line search which can be
-    //! written to a csv file
-    struct CSVOutputLineSearchMicroIterData
-    {
-      /*!
-       * @param[in] csv_output_tracking_data tracking data used to
-       * specify the settings for the csv output.
-       */
-      CSVOutputLineSearchMicroIterData(const CSVOutputTrackingData csv_output_tracking_data);
-
-      //! data collector for a single micro iteration within the
-      //! Local Newton Guess Interpolation -> assigns the values at the specific microiterations
-      struct MicroIterDataCollector
-      {
-        //! current step size \f$ \alpha \f$
-        double current_alpha_ = -1;
-        //! maximum allowed step size \f$ \alpha_{\mathrm{max}} \f$
-        //! accounting for eventual errors
-        double max_alpha_ = -1;
-        //! current equivalent stress
-        double current_equiv_stress_ = -1;
-        //! current plastic strain
-        double current_plastic_strain_ = -1;
-        //! current quadratic residual norm for the current step size
-        double current_quadratic_residual_norm_ = -1;
-        //! maximum allowed quadratic residual norm for the current step size
-        double max_quadratic_residual_norm_ = -1;
-        //! current error status
-        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType current_error_status_ =
-            ErrorType::overflow_error;
-      };
-
-      //! all indices of the microiterations (iterations within the line search)
-      std::vector<unsigned int> all_microiter_;
-
-      //! current step sizes \f$ \alpha \f$ of all
-      //! microiterations
-      std::vector<double> all_current_alpha_;
-
-      //! maximum step sizes \f$ \alpha_{\mathrm{}} \f$ of all
-      //! microiterations
-      std::vector<double> all_max_alpha_;
-
-      //! current equivalent stresses of all microiterations (associated
-      //! with the current line search step sizes)
-      std::vector<double> all_current_equiv_stress_;
-
-      //! current plastic strains of all microiterations (associated
-      //! with the current line search step sizes)
-      std::vector<double> all_current_plastic_strain_;
-
-      //! current quadratic residual norm of all microiterations (associated
-      //! with the current line search step sizes)
-      std::vector<double> all_current_quadratic_residual_norm_;
-
-      //! maximum allowed quadratic residual norm of all microiterations (associated
-      //! with the current line search step sizes)
-      std::vector<double> all_max_quadratic_residual_norm_;
-
-      //! current error status of all microiterations (associated with
-      //! the current line search ste sizes)
-      std::vector<ErrorType> all_current_error_status_;
-
-      //! append collected data for specific microiteration
-      void append_micro_iter_data(
-          const MicroIterDataCollector mi_data_collector, const unsigned micro_iter);
-
-      //! tracking data used to specify the settings for csv output
-      CSVOutputTrackingData csv_output_tracking_data_;
-
-      //! writes data from each microiteration of a single line search (specified via tracking
-      //! data) to a dedicated csv file
-      void write_line_search_micro_iter_data_to_csv();
     };
 
     // display / log evaluation warnings
 #define DISPLAY_WARNINGS ;
-
-
-    // DEBUG: should debug_mode (general) be activated? Also, should other routines output debugging
-    // comments?
-    // We do this for only a set gp and ele_gid
-    inline bool debug_mode(const int ele_gid, const int gp)
-    {
-      constexpr bool use_debug_mode = false;
-      const int debug_ele_gid = 4998;
-      const int debug_gp = 16;
-
-      return (use_debug_mode && ele_gid == debug_ele_gid && gp == debug_gp);
-    }
-    constexpr bool debug_pred_adapt{true};
-    constexpr bool debug_integrate_plastic_strain{true};
-    constexpr bool debug_lnl{true};
-    constexpr bool debug_vplast_law{false};
-
-
-
   }  // namespace InelasticDefgradTransvIsotropElastViscoplastUtils
 
 }  // namespace Mat

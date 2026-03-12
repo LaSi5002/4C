@@ -361,16 +361,6 @@ Core::LinAlg::Matrix<2, 1> Mat::Viscoplastic::Anand::evaluate_derivatives_of_pla
 double Mat::Viscoplastic::Anand::compute_flow_resistance(
     const double equiv_stress, const double equiv_plastic_strain, ErrorType& err_status)
 {
-  // DEBUG
-  if (debug_mode(ele_gid_, gp_) && debug_vplast_law)
-  {
-    std::cout << std::format(
-        "Mat::Viscoplastic::Anand::compute_flow_resistance::Start with equiv_stress {} and plastic "
-        "strain {}\n",
-        equiv_stress, equiv_plastic_strain);
-  }
-
-
 
   // make sure the error status is on no_errors
   err_status = ErrorType::no_errors;
@@ -413,16 +403,6 @@ double Mat::Viscoplastic::Anand::compute_flow_resistance(
     // check for negative flow resistance values
     if (flow_resistance < 0.0)
     {
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_vplast_law)
-      {
-        std::cout << std::format(
-            "Mat::Viscoplastic::Anand::compute_flow_resistance::failed due to negative flow "
-            "resistance {}...\n",
-            flow_resistance);
-      }
-
-
 
       err_status = ErrorType::failed_computation_flow_resistance;
       return -1;
@@ -432,14 +412,6 @@ double Mat::Viscoplastic::Anand::compute_flow_resistance(
     harden_tang = compute_hardening_tangent(equiv_stress, flow_resistance, err_status);
     if (err_status != ErrorType::no_errors)
     {
-      // DEBUG
-      if (debug_mode(ele_gid_, gp_) && debug_vplast_law)
-      {
-        std::cout << std::format(
-            "Mat::Viscoplastic::Anand::compute_flow_resistance::failed due to failed hardening "
-            "tang computation...\n");
-      }
-
       return -1.0;
     }
 
@@ -447,16 +419,6 @@ double Mat::Viscoplastic::Anand::compute_flow_resistance(
     res_S = inv_equiv_stress *
             (flow_resistance - time_step_quantities_.last_substep_flow_resistance_[gp_] -
                 harden_tang * delta_plastic_strain);
-
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_vplast_law)
-    {
-      std::cout << std::format(
-          "ele_gid: {}, gp_: {} --> iter: {} of compute_flow_resistance \n", ele_gid_, gp_, iter);
-      std::cout << std::format("flow_resistance: {}, res_S: {}\n", flow_resistance, res_S);
-    }
-
-
 
     // check convergence
     if (std::abs(res_S) < conv_tol) return flow_resistance;
@@ -477,14 +439,6 @@ double Mat::Viscoplastic::Anand::compute_flow_resistance(
     temp = (1.0 - derivs_harden_tang(1) * delta_plastic_strain);
     // compute inverse Jacobian
     inv_J = equiv_stress / temp;
-
-    // DEBUG
-    if (debug_mode(ele_gid_, gp_) && debug_vplast_law)
-    {
-      std::cout << std::format(
-          "derivs_harden_tang(1): {}, inv_J: {}\n", derivs_harden_tang(1), inv_J);
-    }
-
 
 
     if (std::abs(inv_J) > 1.0e10)

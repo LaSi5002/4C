@@ -2898,14 +2898,6 @@ std::unordered_map<Core::Materials::MaterialType, Core::IO::InputSpec> Global::v
                                 "i.e., set components smaller than (numerical tolerance * "
                                 "2-norm of input matrix) to 0?",
                     .default_value = 1.0e-13}),
-            parameter<bool>("LNGI_CHECK_CONSISTENCY",
-                {.description =
-                        "Local Newton Guess Interpolation: check the consistency of the matrices "
-                        "determined, i.e., whether the extracted components "
-                        "recover the input matrices, and if the product of the elastic and plastic "
-                        "deformation gradients leads to the given deformation gradient",
-                    .default_value = true}),
-
             parameter<bool>("USE_STEEPEST_DESCENT_UPDATE_CORRECTION",
                 {.description = "boolean: use steepest descent direction in single Local Newton "
                                 "iterations if the Newton direction is not a descent direction?"
@@ -2991,20 +2983,6 @@ std::unordered_map<Core::Materials::MaterialType, Core::IO::InputSpec> Global::v
                                 "logarithm",
                     .default_value =
                         Core::LinAlg::GenMatrixLogFirstDerivCalcMethod::pade_part_fract}),
-            parameter<bool>("USE_CSV_OUTPUT_FAILED_LOCAL_NEWTON_ITER",
-                {.description = "output relevant data from each iteration of the last, failed "
-                                "Local Newton loop"
-                                "to a dedicated csv file?",
-                    .default_value = false}),
-            parameter<bool>("USE_CSV_OUTPUT_LNGI_MICRO_ITER",
-                {.description =
-                        "output relevant data from each microiteration of the Local Newton Guess "
-                        "Interpolation (and Reinterpolations) to a dedicated csv file?",
-                    .default_value = false}),
-            parameter<bool>("USE_CSV_OUTPUT_LINE_SEARCH_MICRO_ITER",
-                {.description = "output relevant data from each microiteration of the line search "
-                                "algorithm(s) to a dedicated csv file?",
-                    .default_value = false}),
             parameter<Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonConvCheck>(
                 "LOCAL_NEWTON_CONV_CHECK",
                 {.description = "convergence check/checks used for the Local Newton-Raphson scheme",

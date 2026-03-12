@@ -354,10 +354,6 @@ namespace Mat
       {
         return lngi_plastic_pred_rot_type_;
       };
-      //! get boolean: check consistency of the matrices and their
-      //! components determined and analyzed during Local Newton Guess Interpolation? (true: yes,
-      //! false: no)
-      [[nodiscard]] bool lngi_check_consistency() const { return lngi_check_consistency_; };
       //! get boolean: precondition matrices for the Local Newton Guess Interpolation, i.e., set
       //! components smaller than a set numerical tolerance to 0? (true: yes, false: no)
       [[nodiscard]] bool lngi_precondition_matrices() const { return lngi_precondition_matrices_; };
@@ -392,13 +388,6 @@ namespace Mat
       //! \overline{\sigma}(\xi_lower) | / \overline{\sigma}(\xi_lower) for the Local Newton Guess
       //! Reinterpolation, upon which xi_lower is set as xi in the reinterpolation routine
       [[nodiscard]] double lngi_reinterp_min_rel_dev() const { return lngi_reinterp_min_rel_dev_; }
-      //! get boolean: output relevant data from each microiteration of the Local Newton Guess
-      //! Interpolation (and Reinterpolations) to a dedicated csv file?
-      [[nodiscard]] bool use_csv_output_lngi_micro_iter()
-      {
-        return use_csv_output_lngi_micro_iter_;
-      }
-
       //! get boolean:       use steepest descent direction if the Newton
       //! direction fails in single Local Newton iterations? (true: yes, false: no)
       [[nodiscard]] bool use_steepest_descent_update_correction() const
@@ -441,8 +430,6 @@ namespace Mat
       [[nodiscard]] TimIntType timint_type() const { return timint_type_; };
       //! get the type of material linearization used
       [[nodiscard]] LinearizationType linearization_type() const { return linearization_type_; };
-      //! DEBUG: set linearization type
-      void debug_set_linearization_type(const LinearizationType linearization_type);
       //! get maximum, numerically evaluable plastic strain increment
       [[nodiscard]] double max_plastic_strain_incr() const { return max_plastic_strain_incr_; };
       //! get maximum, numerically evaluable value for the increment of
@@ -471,20 +458,6 @@ namespace Mat
       {
         return mat_log_deriv_calc_method_;
       }
-      //! get boolean: output relevant data from each iteration of the last, failed Local Newton
-      //! loop to a dedicated csv file?
-      [[nodiscard]] bool use_csv_output_failed_local_newton_iter() const
-      {
-        return use_csv_output_failed_local_newton_iter_;
-      }
-
-      //! get boolean: output relevant data from each microiteration of the line
-      //! search algorithm(s) to a dedicated csv file?
-      [[nodiscard]] bool use_csv_output_line_search_micro_iter()
-      {
-        return use_csv_output_line_search_micro_iter_;
-      }
-
       //! get convergence tolerance for the Local Newton-Raphson scheme
       //! (absolute residual value)
       [[nodiscard]] double local_newton_res_tol() { return local_newton_res_tol_; }
@@ -592,11 +565,6 @@ namespace Mat
       //! * 2-norm of input matrix) to 0? (true: yes, false: no)
       const double lngi_precondition_matrices_num_tol_;
 
-      //! Local Newton Guess Interpolation: check consistency of the matrices and their
-      //! components determined and analyzed during the interpolation algorithm? (true: yes, false:
-      //! no)
-      const bool lngi_check_consistency_;
-
       //! boolean: use steepest descent direction if the Newton
       //! direction fails in single Local Newton iterations? (true: yes, false: no)
       const double use_steepest_descent_update_correction_;
@@ -655,18 +623,6 @@ namespace Mat
 
       //! strategy in case of divergence of the Local Newton-Raphson scheme
       const LocalNewtonDiverCont local_newton_diver_cont_;
-
-      //! output relevant data from each iteration of the last, failed Local Newton
-      //! loop to a dedicated csv file
-      const bool use_csv_output_failed_local_newton_iter_;
-
-      //! output relevant data from each microiteration of the Local Newton Guess Interpolation (and
-      //! Reinterpolations) to a dedicated csv file
-      const bool use_csv_output_lngi_micro_iter_;
-
-      //! output relevant data from each microiteration of the line
-      //! search algorithm(s) to a dedicated csv file
-      const bool use_csv_output_line_search_micro_iter_;
     };
   }  // namespace PAR
 
@@ -1794,17 +1750,6 @@ namespace Mat
 
     //! tracker object for the Local Newton initial guess interpolation
     LocalNewtonGuessInterpolation lnl_guess_interpolation_;
-
-    //! tracker for current global iteration index
-    unsigned int globiter_;
-
-    //! micro iteration data for all microiterations
-    //! of the Local Newton Guess Interpolation, to be written to csv
-    CSVOutputPredAdaptMicroIterData csv_output_lngi_micro_iter_data_;
-
-    //! micro iteration data for all microiterations
-    //! of the line search, to be written to csv
-    CSVOutputLineSearchMicroIterData csv_output_line_search_micro_iter_data_;
 
     //! tracker object for the local substepping procedure
     LocalSubsteppingUtils local_substepping_utils_;
