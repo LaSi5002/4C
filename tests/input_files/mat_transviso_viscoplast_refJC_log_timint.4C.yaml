@@ -53,7 +53,7 @@ MATERIALS:
       YIELD_COND_B: 2
       YIELD_COND_F: 2.5
       MAT_BEHAVIOR: transv_isotrop
-      MAX_SUBSTEPPING_HALVE_NUM:  1
+      MAX_SUBSTEPPING_HALVE_NUM: 1
   - MAT: 4
     MAT_ViscoplasticLawReformulatedJohnsonCook:
       STRAIN_RATE_PREFAC: 1

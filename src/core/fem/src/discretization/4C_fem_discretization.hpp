@@ -245,6 +245,14 @@ namespace Core::FE
     [[nodiscard]] int global_id() const { return discretization_->elecolptr_[local_id_]->id(); }
 
     /**
+     * Return the evaluation time of the element in the discretization.
+     */
+    [[nodiscard]] double eval_time() const
+    {
+      return discretization_->elecolptr_[local_id_]->eval_time();
+    }
+
+    /**
      * Return a pointer to user data of type Element. This may be nullptr.
      */
     [[nodiscard]] MaybeConst<Elements::Element>* user_element() const
@@ -527,6 +535,18 @@ namespace Core::FE
       FOUR_C_ASSERT(dofsets_.size() == 1, "Discretization {} expects just one dof set!", name_);
       return num_dof(0, element);
     }
+
+    //! Enable or disable element evaluation timing for this discretization
+    void set_time_ele_evaluations(const bool value) { time_ele_evaluations_ = value; }
+
+    //! Whether element evaluation timing is enabled for this discretization
+    [[nodiscard]] bool time_ele_evaluations() const { return time_ele_evaluations_; }
+
+    //! Reset stored element evaluation timers for all local column elements
+    void reset_element_eval_timers();
+
+    //! Get per-rank evaluation time summed over all local column elements
+    std::vector<double> get_rank_eval_times() const;
 
     /*!
     \brief Get the gid of a dof for given element.
@@ -2415,6 +2435,8 @@ namespace Core::FE
     //! Flag indicating whether degrees of freedom where assigned
     bool havedof_;
 
+    //! Flag: time each element evaluation and store the result in the element
+    bool time_ele_evaluations_{false};
 
     //! @name Elements
     //! @{

@@ -11,6 +11,7 @@
 #include "4C_config.hpp"
 
 #include "4C_inpar_structure.hpp"  // enumerators
+#include "4C_io_runtime_csv_writer.hpp"
 #include "4C_io_visualization_parameters.hpp"
 #include "4C_structure_new_elements_paramsinterface.hpp"  // interface to the element evaluation
 #include "4C_structure_new_error_evaluator.hpp"
@@ -378,6 +379,13 @@ namespace Solid
        */
       void init_output_runtime_structure_gauss_point_data();
 
+
+      /*! \brief writes output for discretization structure at the end of a time step
+       *
+
+       *  */
+      void output_rank_eval_times() const;
+
       /*! \brief writes output for discretization structure at the end of a time step
        *
 
@@ -513,6 +521,9 @@ namespace Solid
      private:
       //! structural element evaluation time
       double* dt_ele_ptr_;
+
+      //! csv writer for per rank per timestep evaluation times
+      std::unique_ptr<Core::IO::RuntimeCsvWriter> runtime_csvwriter_rank_eval_times_;
 
       //! mass linearization type
       Inpar::Solid::MassLin masslin_type_;

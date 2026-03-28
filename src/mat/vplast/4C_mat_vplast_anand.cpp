@@ -361,7 +361,6 @@ Core::LinAlg::Matrix<2, 1> Mat::Viscoplastic::Anand::evaluate_derivatives_of_pla
 double Mat::Viscoplastic::Anand::compute_flow_resistance(
     const double equiv_stress, const double equiv_plastic_strain, ErrorType& err_status)
 {
-
   // make sure the error status is on no_errors
   err_status = ErrorType::no_errors;
 
@@ -403,7 +402,6 @@ double Mat::Viscoplastic::Anand::compute_flow_resistance(
     // check for negative flow resistance values
     if (flow_resistance < 0.0)
     {
-
       err_status = ErrorType::failed_computation_flow_resistance;
       return -1;
     }

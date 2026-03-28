@@ -175,7 +175,11 @@ std::vector<Core::IO::InputSpec> Inpar::IO::valid_parameters()
                               "(in seconds), smaller zero to disable",
                   .default_value = -1.0}),
           parameter<int>("RESTARTEVERY",
-              {.description = "write restart every RESTARTEVERY steps", .default_value = -1})},
+              {.description = "write restart every RESTARTEVERY steps", .default_value = -1}),
+          parameter<bool>("PER_RANK_EVAL_TIME",
+              {.description =
+                      "write per rank wall time for element evaluation to csv file",
+                  .default_value = false})},
       {.required = false}));
   return specs;
 }
