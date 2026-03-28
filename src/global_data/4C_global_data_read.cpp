@@ -830,6 +830,13 @@ std::unique_ptr<Core::IO::MeshReader> Global::read_discretization(
         break;
     }
 
+    dis->set_time_ele_evaluations(
+        Global::Problem::instance()
+            ->io_params()
+            .sublist("RUNTIME VTK OUTPUT")
+            .get<bool>("ELEMENT_EVAL_TIME") or
+        Global::Problem::instance()->io_params().get<bool>("PER_RANK_EVAL_TIME"));
+
     problem.add_dis(name, dis);
 
     if (!input_file_keyword.empty()) meshreader.attach_discretization(dis, input_file_keyword);

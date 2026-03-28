@@ -235,6 +235,11 @@ namespace Core::Elements
     int id() const { return id_; }
 
     /*!
+    \brief Return evaluation time of this element
+    */
+    double eval_time() const { return eval_time_; }
+
+    /*!
     \brief Return processor local col map id
     */
     virtual int lid() const { return lid_; }
@@ -654,6 +659,16 @@ might become invalid after a redistribution of the discretization.
     void set_id(const int id) { id_ = id; }
 
     /*!
+    \brief Set evaluation time of this element
+    */
+    void set_eval_time(const double eval_time) { eval_time_ = eval_time; }
+
+    /*!
+    \brief Add evaluation time to this element
+    */
+    void add_eval_time(const double eval_time) { eval_time_ += eval_time; }
+
+    /*!
     \brief Read input for this element
     */
     virtual bool read_element(const std::string& eletype, Core::FE::CellType celltype,
@@ -867,6 +882,62 @@ might become invalid after a redistribution of the discretization.
     */
     virtual void location_vector(const Core::FE::Discretization& dis, std::vector<int>& lm,
         std::vector<int>& lmowner, std::vector<int>& lmstride) const;
+
+    /*!
+    \brief Evaluate an element and if element timing is enabled, time it.
+
+    It uses the overwritten evaluate method to evaluate the element and
+    adds timing if element timing is enabled in the discretization.
+
+    \param params (in/out)    : ParameterList for communication between control routine
+                                and elements
+    \param discretization (in): A reference to the underlying discretization
+    \param la (in)            : location data for all dofsets of the discretization
+    \param elemat1 (out)      : matrix to be filled by element depending on commands
+                                given in params
+    \param elemat2 (out)      : matrix to be filled by element depending on commands
+                                given in params
+    \param elevec1 (out)      : vector to be filled by element depending on commands
+                                given in params
+    \param elevec2 (out)      : vector to be filled by element depending on commands
+                                given in params
+    \param elevec3 (out)      : vector to be filled by element depending on commands
+                                given in params
+    \return 0 if successful, negative otherwise
+    */
+    int evaluate_with_timing(Teuchos::ParameterList& params,
+        Core::FE::Discretization& discretization, LocationArray& la,
+        Core::LinAlg::SerialDenseMatrix& elemat1, Core::LinAlg::SerialDenseMatrix& elemat2,
+        Core::LinAlg::SerialDenseVector& elevec1, Core::LinAlg::SerialDenseVector& elevec2,
+        Core::LinAlg::SerialDenseVector& elevec3);
+
+    /*!
+    \brief Evaluate an element and if element timing is enabled, time it.
+
+    It uses the overwritten evaluate method to evaluate the element and
+    adds timing if element timing is enabled in the discretization.
+
+    \param params (in/out)    : ParameterList for communication between control routine
+                                and elements
+    \param discretization (in): A reference to the underlying discretization
+    \param lm (in)            : location vector of this element
+    \param elemat1 (out)      : matrix to be filled by element depending on commands
+                                given in params
+    \param elemat2 (out)      : matrix to be filled by element depending on commands
+                                given in params
+    \param elevec1 (out)      : vector to be filled by element depending on commands
+                                given in params
+    \param elevec2 (out)      : vector to be filled by element depending on commands
+                                given in params
+    \param elevec3 (out)      : vector to be filled by element depending on commands
+                                given in params
+    \return 0 if successful, negative otherwise
+    */
+    int evaluate_with_timing(Teuchos::ParameterList& params,
+        Core::FE::Discretization& discretization, std::vector<int>& lm,
+        Core::LinAlg::SerialDenseMatrix& elemat1, Core::LinAlg::SerialDenseMatrix& elemat2,
+        Core::LinAlg::SerialDenseVector& elevec1, Core::LinAlg::SerialDenseVector& elevec2,
+        Core::LinAlg::SerialDenseVector& elevec3);
 
     /*!
     \brief Evaluate an element
@@ -1090,6 +1161,9 @@ might become invalid after a redistribution of the discretization.
    private:
     //! \brief A unique global element id
     int id_;
+
+    //! \brief Accumulated time the evaluation function of this element took since the last reset
+    double eval_time_;
 
     //! local col map id
     int lid_;

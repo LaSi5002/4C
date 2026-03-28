@@ -20,6 +20,7 @@
 
 #include <Shards_BasicTopologies.hpp>
 
+#include <chrono>
 #include <utility>
 #include <vector>
 
@@ -123,7 +124,7 @@ Core::FE::CellType Core::Elements::shards_key_to_dis_type(const unsigned& key)
  |  ctor (public)                                            mwgee 11/06|
  *----------------------------------------------------------------------*/
 Core::Elements::Element::Element(int id, int owner)
-    : ParObject(), id_(id), lid_(-1), owner_(owner), mat_(1, nullptr)
+    : ParObject(), id_(id), eval_time_(0.0), lid_(-1), owner_(owner), mat_(1, nullptr)
 {
 }
 
@@ -133,6 +134,7 @@ Core::Elements::Element::Element(int id, int owner)
 Core::Elements::Element::Element(const Element& old)
     : ParObject(old),
       id_(old.id_),
+      eval_time_(old.eval_time_),
       lid_(old.lid_),
       owner_(old.owner_),
       nodeid_(old.nodeid_),
@@ -650,7 +652,37 @@ void Core::Elements::Element::set_face(
   face_[faceindex] = Core::Utils::shared_ptr_from_ref<Core::Elements::FaceElement>(*faceelement);
 }
 
+int Core::Elements::Element::evaluate_with_timing(Teuchos::ParameterList& params,
+    Core::FE::Discretization& discretization, LocationArray& la,
+    Core::LinAlg::SerialDenseMatrix& elemat1, Core::LinAlg::SerialDenseMatrix& elemat2,
+    Core::LinAlg::SerialDenseVector& elevec1, Core::LinAlg::SerialDenseVector& elevec2,
+    Core::LinAlg::SerialDenseVector& elevec3)
+{
+  const auto start_time = discretization.time_ele_evaluations()
+                              ? std::chrono::steady_clock::now()
+                              : std::chrono::steady_clock::time_point{};
+  const int err = evaluate(params, discretization, la, elemat1, elemat2, elevec1, elevec2, elevec3);
+  if (discretization.time_ele_evaluations())
+    eval_time_ +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
+  return err;
+}
 
+int Core::Elements::Element::evaluate_with_timing(Teuchos::ParameterList& params,
+    Core::FE::Discretization& discretization, std::vector<int>& lm,
+    Core::LinAlg::SerialDenseMatrix& elemat1, Core::LinAlg::SerialDenseMatrix& elemat2,
+    Core::LinAlg::SerialDenseVector& elevec1, Core::LinAlg::SerialDenseVector& elevec2,
+    Core::LinAlg::SerialDenseVector& elevec3)
+{
+  const auto start_time = discretization.time_ele_evaluations()
+                              ? std::chrono::steady_clock::now()
+                              : std::chrono::steady_clock::time_point{};
+  const int err = evaluate(params, discretization, lm, elemat1, elemat2, elevec1, elevec2, elevec3);
+  if (discretization.time_ele_evaluations())
+    eval_time_ +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
+  return err;
+}
 
 /*----------------------------------------------------------------------*
  |  evaluate element dummy (public)                          mwgee 12/06|
