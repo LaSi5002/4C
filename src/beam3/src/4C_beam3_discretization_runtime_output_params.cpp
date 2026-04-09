@@ -14,39 +14,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*-----------------------------------------------------------------------------------------------*
  *-----------------------------------------------------------------------------------------------*/
-Discret::Elements::BeamRuntimeOutputParams::BeamRuntimeOutputParams()
-    : isinit_(false),
-      issetup_(false),
-      output_displacement_state_(false),
-      use_absolute_positions_visualizationpoint_coordinates_(true),
-      write_internal_energy_element_(false),
-      write_kinetic_energy_element_(false),
-      write_triads_visualizationpoints_(false),
-      write_material_crosssection_strains_gausspoints_(false),
-      write_material_crosssection_strains_continuous_(false),
-      write_material_crosssection_stresses_gausspoints_(false),
-      write_spatial_crosssection_stresses_gausspoints_(false),
-      write_filament_condition_(false),
-      write_orientation_parameter_(false),
-      write_rve_crosssection_forces_(false),
-      write_ref_length_(false),
-      write_element_gid_(false),
-      write_element_ghosting_(false),
-      n_subsegments_(0)
-{
-  // empty constructor
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Discret::Elements::BeamRuntimeOutputParams::init(
+Discret::Elements::BeamRuntimeOutputParams::BeamRuntimeOutputParams(
     const Teuchos::ParameterList& IO_vtk_structure_beams_paramslist)
 {
-  // We have to call setup() after init()
-  issetup_ = false;
-
-  // initialize the parameter values
-
   output_displacement_state_ = IO_vtk_structure_beams_paramslist.get<bool>("DISPLACEMENT");
 
   use_absolute_positions_visualizationpoint_coordinates_ =
@@ -91,26 +61,6 @@ void Discret::Elements::BeamRuntimeOutputParams::init(
   n_subsegments_ = IO_vtk_structure_beams_paramslist.get<int>("NUMBER_SUBSEGMENTS");
   if (n_subsegments_ < 1)
     FOUR_C_THROW("The number of subsegments has to be at least 1. Got {}", n_subsegments_);
-
-  isinit_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Discret::Elements::BeamRuntimeOutputParams::setup()
-{
-  if (not is_init()) FOUR_C_THROW("init() has not been called, yet!");
-
-  // Nothing to do here at the moment
-
-  issetup_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Discret::Elements::BeamRuntimeOutputParams::check_init_setup() const
-{
-  if (not is_init() or not is_setup()) FOUR_C_THROW("Call init() and setup() first!");
 }
 
 FOUR_C_NAMESPACE_CLOSE

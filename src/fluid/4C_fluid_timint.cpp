@@ -60,8 +60,7 @@ FLD::TimInt::TimInt(const std::shared_ptr<Core::FE::Discretization>& discret,
   // create and initialize parameter container object for fluid specific runtime output
   if (output_fluid)
   {
-    runtime_output_params_.init(fluid_runtime_output_list);
-    runtime_output_params_.setup();
+    runtime_output_params_ = Discret::Elements::FluidRuntimeOutputParams(fluid_runtime_output_list);
 
     // TODO This does not work for restarted simulations as the time_ is not yet correctly set.
     // However, this is called before the restart is read and someone with knowledge on the module

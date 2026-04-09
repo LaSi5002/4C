@@ -16,33 +16,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*-----------------------------------------------------------------------------------------------*
  *-----------------------------------------------------------------------------------------------*/
-Discret::Elements::StructureRuntimeOutputParams::StructureRuntimeOutputParams()
-    : isinit_(false),
-      issetup_(false),
-      output_displacement_state_(false),
-      output_velocity_state_(false),
-      output_acceleration_state_(false),
-      output_contact_(false),
-      output_element_owner_(false),
-      output_element_gid_(false),
-      output_element_material_id_(false),
-      output_element_ghosting_(false),
-      output_node_gid_(false),
-      output_stress_strain_(false),
-      gauss_point_data_output_type_(Inpar::Solid::GaussPointDataOutputType::none)
-{
-  // empty constructor
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Discret::Elements::StructureRuntimeOutputParams::init(
+Discret::Elements::StructureRuntimeOutputParams::StructureRuntimeOutputParams(
     const Teuchos::ParameterList& IO_vtk_structure_structure_paramslist)
 {
-  // We have to call setup() after init()
-  issetup_ = false;
-
-  // initialize the parameter values
   output_displacement_state_ = IO_vtk_structure_structure_paramslist.get<bool>("DISPLACEMENT");
   output_velocity_state_ = IO_vtk_structure_structure_paramslist.get<bool>("VELOCITY");
   output_acceleration_state_ = IO_vtk_structure_structure_paramslist.get<bool>("ACCELERATION");
@@ -74,26 +50,6 @@ void Discret::Elements::StructureRuntimeOutputParams::init(
           "STRUCT_STRESS in the --IO section has to be activated.");
     }
   }
-
-  isinit_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Discret::Elements::StructureRuntimeOutputParams::setup()
-{
-  FOUR_C_ASSERT(is_init(), "init() has not been called, yet!");
-
-  // Nothing to do here at the moment
-
-  issetup_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Discret::Elements::StructureRuntimeOutputParams::check_init_setup() const
-{
-  FOUR_C_ASSERT(is_init() and is_setup(), "Call init() and setup() first!");
 }
 
 FOUR_C_NAMESPACE_CLOSE

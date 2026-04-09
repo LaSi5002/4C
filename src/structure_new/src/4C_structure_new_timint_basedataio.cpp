@@ -99,19 +99,15 @@ void Solid::TimeInt::BaseDataIO::init(const Teuchos::ParameterList& ioparams,
     // check whether VTK output at runtime is desired
     if (ioparams.sublist("RUNTIME VTK OUTPUT").get<int>("INTERVAL_STEPS") != -1)
     {
-      params_runtime_vtk_output_ = std::make_shared<ParamsRuntimeOutput>();
-
-      params_runtime_vtk_output_->init(ioparams.sublist("RUNTIME VTK OUTPUT"));
-      params_runtime_vtk_output_->setup();
+      params_runtime_vtk_output_ =
+          std::make_shared<ParamsRuntimeOutput>(ioparams.sublist("RUNTIME VTK OUTPUT"));
     }
 
     // check whether VTP output at runtime is desired
     if (ioparams.sublist("RUNTIME VTP OUTPUT STRUCTURE").get<int>("INTERVAL_STEPS") != -1)
     {
-      params_runtime_vtp_output_ = std::make_shared<ParamsRuntimeVtpOutput>();
-
-      params_runtime_vtp_output_->init(ioparams.sublist("RUNTIME VTP OUTPUT STRUCTURE"));
-      params_runtime_vtp_output_->setup();
+      params_runtime_vtp_output_ = std::make_shared<ParamsRuntimeVtpOutput>(
+          ioparams.sublist("RUNTIME VTP OUTPUT STRUCTURE"));
     }
   }
 

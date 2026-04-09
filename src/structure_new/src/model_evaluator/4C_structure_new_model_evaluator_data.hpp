@@ -962,39 +962,17 @@ namespace Solid
       //! constructor
       BeamData();
 
-      //! initialize the stuff coming from outside
-      void init();
-
-      //! setup member variables
-      void setup();
-
       //! @name Derived Solid::Elements::BeamParamsInterface accessors
       //!@{
 
       //! get the Lie group GenAlpha time integration parameters [derived]
-      [[nodiscard]] inline double get_beta() const override
-      {
-        check_init_setup();
-        return beta_;
-      }
+      [[nodiscard]] inline double get_beta() const override { return beta_; }
 
-      [[nodiscard]] inline double get_gamma() const override
-      {
-        check_init_setup();
-        return gamma_;
-      }
+      [[nodiscard]] inline double get_gamma() const override { return gamma_; }
 
-      [[nodiscard]] inline double get_alphaf() const override
-      {
-        check_init_setup();
-        return alphaf_;
-      }
+      [[nodiscard]] inline double get_alphaf() const override { return alphaf_; }
 
-      [[nodiscard]] inline double get_alpham() const override
-      {
-        check_init_setup();
-        return alpham_;
-      }
+      [[nodiscard]] inline double get_alpham() const override { return alpham_; }
 
       //!@}
 
@@ -1011,30 +989,7 @@ namespace Solid
 
       //!@}
 
-     protected:
-      //! returns the #isinit_ flag
-      inline const bool& is_init() const { return isinit_; };
-
-      //! returns the #issetup_ flag
-      inline const bool& is_setup() const { return issetup_; };
-
-      //! Checks the init and setup status
-      inline void check_init_setup() const
-      {
-        FOUR_C_ASSERT(is_init() and is_setup(), "Call init() and setup() first!");
-      }
-
-      //! Checks the init status
-      inline void check_init() const
-      {
-        FOUR_C_ASSERT(is_init(), "init() has not been called, yet!");
-      }
-
      private:
-      bool isinit_;
-
-      bool issetup_;
-
       //! @name time integration parameters
       //!@{
 

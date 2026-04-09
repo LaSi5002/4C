@@ -16,12 +16,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*-----------------------------------------------------------------------------------------------*
  *-----------------------------------------------------------------------------------------------*/
-void Solid::TimeInt::ParamsRuntimeVtpOutput::init(
+Solid::TimeInt::ParamsRuntimeVtpOutput::ParamsRuntimeVtpOutput(
     const Teuchos::ParameterList& IO_vtp_structure_paramslist)
 {
-  // We have to call setup() after init()
-  issetup_ = false;
-
   output_interval_steps_ = IO_vtp_structure_paramslist.get<int>("INTERVAL_STEPS");
 
   output_every_iteration_ = IO_vtp_structure_paramslist.get<bool>("EVERY_ITERATION");
@@ -36,27 +33,6 @@ void Solid::TimeInt::ParamsRuntimeVtpOutput::init(
   output_numberofbonds_ = IO_vtp_structure_paramslist.get<bool>("NUMBEROFBONDS");
 
   output_linkingforce_ = IO_vtp_structure_paramslist.get<bool>("LINKINGFORCE");
-
-
-  isinit_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Solid::TimeInt::ParamsRuntimeVtpOutput::setup()
-{
-  FOUR_C_ASSERT(is_init(), "init() has not been called, yet!");
-
-  // Nothing to do here at the moment
-
-  issetup_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Solid::TimeInt::ParamsRuntimeVtpOutput::check_init_setup() const
-{
-  FOUR_C_ASSERT(is_init() and is_setup(), "Call init() and setup() first!");
 }
 
 FOUR_C_NAMESPACE_CLOSE

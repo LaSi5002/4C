@@ -24,92 +24,37 @@ namespace Discret
      public:
       /// constructor
       FluidRuntimeOutputParams() = default;
+      explicit FluidRuntimeOutputParams(const Teuchos::ParameterList& IO_fluid_paramslist);
 
       /// destructor
       virtual ~FluidRuntimeOutputParams() = default;
 
-      /// initialize the class variables
-      void init(const Teuchos::ParameterList& IO_fluid_paramslist);
-
-      /// setup new class variables
-      void setup();
-
       /// whether to write velocity
-      bool output_velocity_state() const
-      {
-        check_init_setup();
-        return output_velocity_state_;
-      };
+      bool output_velocity_state() const { return output_velocity_state_; };
 
       /// whether to write pressure
-      bool output_pressure_state() const
-      {
-        check_init_setup();
-        return output_pressure_state_;
-      };
+      bool output_pressure_state() const { return output_pressure_state_; };
 
       /// whether to write velocity
-      bool output_acceleration_state() const
-      {
-        check_init_setup();
-        return output_acceleration_state_;
-      };
+      bool output_acceleration_state() const { return output_acceleration_state_; };
 
       /// whether to write displacements
-      bool output_displacement_state() const
-      {
-        check_init_setup();
-        return output_displacement_state_;
-      };
+      bool output_displacement_state() const { return output_displacement_state_; };
 
       /// whether to write velocity
-      bool output_grid_velocity_state() const
-      {
-        check_init_setup();
-        return output_gridvelocity_state_;
-      };
+      bool output_grid_velocity_state() const { return output_gridvelocity_state_; };
 
       /// whether to write the owner of elements
-      bool output_element_owner() const
-      {
-        check_init_setup();
-        return output_element_owner_;
-      };
+      bool output_element_owner() const { return output_element_owner_; };
 
       /// whether to write the GIDs of elements
-      bool output_element_gid() const
-      {
-        check_init_setup();
-        return output_element_gid_;
-      };
+      bool output_element_gid() const { return output_element_gid_; };
 
       /// whether to write the GIDs of the nodes
-      bool output_node_gid() const
-      {
-        check_init_setup();
-        return output_node_gid_;
-      };
-
-     private:
-      /// get the init indicator status
-      const bool& is_init() const { return isinit_; };
-
-      /// get the setup indicator status
-      const bool& is_setup() const { return issetup_; };
-
-      /// Check if init() and setup() have been called, yet.
-      void check_init_setup() const;
+      bool output_node_gid() const { return output_node_gid_; };
 
 
      private:
-      /// @name variables for internal use only
-      /// @{
-      ///
-      bool isinit_ = false;
-
-      bool issetup_ = false;
-      /// @}
-
       /// @name variables controlling output
       /// @{
 

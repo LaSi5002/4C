@@ -17,13 +17,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*-----------------------------------------------------------------------------------------------*
  *-----------------------------------------------------------------------------------------------*/
-void Solid::TimeInt::ParamsRuntimeOutput::init(
+Solid::TimeInt::ParamsRuntimeOutput::ParamsRuntimeOutput(
     const Teuchos::ParameterList& IO_vtk_structure_paramslist)
 {
-  // We have to call setup() after init()
-  issetup_ = false;
-
-  // initialize the parameter values
   output_interval_steps_ = IO_vtk_structure_paramslist.get<int>("INTERVAL_STEPS");
   output_step_offset_ = IO_vtk_structure_paramslist.get<int>("STEP_OFFSET");
   output_every_iteration_ = IO_vtk_structure_paramslist.get<bool>("EVERY_ITERATION");
@@ -36,10 +32,8 @@ void Solid::TimeInt::ParamsRuntimeOutput::init(
   if (output_structure_)
   {
     params_runtime_output_structure_ =
-        std::make_shared<Discret::Elements::StructureRuntimeOutputParams>();
-
-    params_runtime_output_structure_->init(IO_vtk_structure_paramslist.sublist("STRUCTURE"));
-    params_runtime_output_structure_->setup();
+        std::make_shared<Discret::Elements::StructureRuntimeOutputParams>(
+            IO_vtk_structure_paramslist.sublist("STRUCTURE"));
   }
 
 
@@ -49,32 +43,9 @@ void Solid::TimeInt::ParamsRuntimeOutput::init(
   // create and initialize parameter container object for beam specific runtime output
   if (output_beams_)
   {
-    params_runtime_output_beams_ = std::make_shared<Discret::Elements::BeamRuntimeOutputParams>();
-
-    params_runtime_output_beams_->init(IO_vtk_structure_paramslist.sublist("BEAMS"));
-    params_runtime_output_beams_->setup();
+    params_runtime_output_beams_ = std::make_shared<Discret::Elements::BeamRuntimeOutputParams>(
+        IO_vtk_structure_paramslist.sublist("BEAMS"));
   }
-
-
-  isinit_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Solid::TimeInt::ParamsRuntimeOutput::setup()
-{
-  FOUR_C_ASSERT(is_init(), "init() has not been called, yet!");
-
-  // Nothing to do here at the moment
-
-  issetup_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void Solid::TimeInt::ParamsRuntimeOutput::check_init_setup() const
-{
-  FOUR_C_ASSERT(is_init() and is_setup(), "Call init() and setup() first!");
 }
 
 FOUR_C_NAMESPACE_CLOSE

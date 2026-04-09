@@ -246,8 +246,6 @@ void Solid::ModelEvaluator::Data::setup()
   if (sdyn_ptr_->have_ele_tech(Inpar::Solid::EleTech::rotvec))
   {
     beam_data_ptr_ = std::make_shared<BeamData>();
-    beam_data_ptr_->init();
-    beam_data_ptr_->setup();
   }
 
   issetup_ = true;

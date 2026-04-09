@@ -26,42 +26,22 @@ namespace Solid
     class ParamsRuntimeVtpOutput
     {
      public:
+      explicit ParamsRuntimeVtpOutput(const Teuchos::ParameterList& IO_vtp_structure_paramslist);
+
       /// destructor
       virtual ~ParamsRuntimeVtpOutput() = default;
 
-      /// initialize the class variables
-      void init(const Teuchos::ParameterList& IO_vtp_structure_paramslist);
-
-      /// setup new class variables
-      void setup();
-
       /// whether to write owner at visualization point
-      bool output_owner() const
-      {
-        check_init_setup();
-        return output_owner_;
-      };
+      bool output_owner() const { return output_owner_; };
 
       /// whether to write orientation at visualization point
-      bool output_orientation_and_length() const
-      {
-        check_init_setup();
-        return output_orientationandlength_;
-      };
+      bool output_orientation_and_length() const { return output_orientationandlength_; };
 
       /// whether to write number of bonds at visualization point
-      bool output_number_of_bonds() const
-      {
-        check_init_setup();
-        return output_numberofbonds_;
-      };
+      bool output_number_of_bonds() const { return output_numberofbonds_; };
 
       /// whether to write number of bonds at visualization point
-      bool output_linking_force() const
-      {
-        check_init_setup();
-        return output_linkingforce_;
-      };
+      bool output_linking_force() const { return output_linkingforce_; };
       /*    /// whether to write displacements
           bool output_displacement_state() const
           {
@@ -76,27 +56,7 @@ namespace Solid
             return params_runtime_output_beams_;
           };*/
 
-
      private:
-      /// get the init indicator status
-      const bool& is_init() const { return isinit_; };
-
-      /// get the setup indicator status
-      const bool& is_setup() const { return issetup_; };
-
-      /// Check if init() and setup() have been called, yet.
-      void check_init_setup() const;
-
-
-     private:
-      /// @name variables for internal use only
-      /// @{
-      ///
-      bool isinit_ = false;
-
-      bool issetup_ = false;
-      /// @}
-
       /// @name variables controlling output
       /// @{
 
