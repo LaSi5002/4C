@@ -17,13 +17,6 @@ FBI::BeamToFluidMeshtyingVtkOutputParams::BeamToFluidMeshtyingVtkOutputParams()
     : BeamInteraction::BeamToSolidVolumeMeshtyingVisualizationOutputParams(),
       constraint_violation_(false)
 {
-  // empty constructor
-}
-/*----------------------------------------------------------------------------------------------------*/
-void FBI::BeamToFluidMeshtyingVtkOutputParams::setup()
-{
-  check_init();
-
   // Teuchos parameter lists from input file.
   const Teuchos::ParameterList& beam_to_fluid_meshtying_visualization_output_paramslist =
       Global::Problem::instance()
@@ -49,9 +42,6 @@ void FBI::BeamToFluidMeshtyingVtkOutputParams::setup()
 
   constraint_violation_ =
       beam_to_fluid_meshtying_visualization_output_paramslist.get<bool>("CONSTRAINT_VIOLATION");
-
-  // Set the setup flag.
-  issetup_ = true;
 }
 
 FOUR_C_NAMESPACE_CLOSE

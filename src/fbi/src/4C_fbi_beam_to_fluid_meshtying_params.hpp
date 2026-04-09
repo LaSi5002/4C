@@ -41,17 +41,6 @@ namespace FBI
      */
     BeamToFluidMeshtyingParams();
 
-
-    /**
-     * \brief Initialize with the stuff coming from input file
-     */
-    void init();
-
-    /**
-     * \brief Setup
-     */
-    void setup();
-
     /// Sets the flag to compute only force contributions from the beam
     void set_weak_dirichlet_flag() { calcfluidweakdirichletforce_ = true; }
 
@@ -60,32 +49,6 @@ namespace FBI
 
     /// Returns \ref calcfluidweakdirichletforce_
     bool get_weak_dirichlet_flag() { return calcfluidweakdirichletforce_; }
-
-    /**
-     * \brief Returns the isinit_ flag.
-     */
-    inline const bool& is_init() const { return isinit_; };
-
-    /**
-     * \brief Returns the issetup_ flag.
-     */
-    inline const bool& is_setup() const { return issetup_; };
-
-    /**
-     * \brief Checks the init and setup status.
-     */
-    inline void check_init_setup() const
-    {
-      if (!is_init() or !is_setup()) FOUR_C_THROW("Call init() and setup() first!");
-    }
-
-    /**
-     * \brief Checks the init status.
-     */
-    inline void check_init() const
-    {
-      if (!is_init()) FOUR_C_THROW("init() has not been called, yet!");
-    }
 
     /**
      * \brief Returns the contact discretization method.
@@ -133,14 +96,7 @@ namespace FBI
       return mortar_shape_function_;
     }
 
-
    private:
-    /// Flag if Init was called.
-    bool isinit_;
-
-    /// Flag if Setup was called.
-    bool issetup_;
-
     /// Enforcement strategy for constraints.
     FBI::BeamToFluidConstraintEnforcement constraint_enforcement_;
 

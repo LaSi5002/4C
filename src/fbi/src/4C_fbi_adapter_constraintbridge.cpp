@@ -33,8 +33,6 @@ void Adapter::FBIConstraintBridge::setup(const Core::LinAlg::Map* beam_map,
 {
   // Create the beaminteraction data container and set the parameters
   beam_interaction_params_ = std::make_shared<FBI::BeamToFluidMeshtyingParams>();
-  beam_interaction_params_->init();
-  beam_interaction_params_->setup();
 
   const Teuchos::ParameterList& geometry_parameter_list =
       Global::Problem::instance()->fbi_params().sublist("BEAM TO FLUID MESHTYING");

@@ -26,11 +26,6 @@ namespace FBI
      */
     BeamToFluidMeshtyingVtkOutputParams();
 
-    /**
-     * \brief Setup member variables.
-     */
-    void setup();
-
     // returns flag enabling/disabling output of the constraint violation
     bool get_constraint_violation_output_flag() const { return constraint_violation_; };
 

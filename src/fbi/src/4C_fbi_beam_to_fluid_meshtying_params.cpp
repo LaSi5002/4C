@@ -21,22 +21,12 @@ FOUR_C_NAMESPACE_OPEN
  *
  */
 FBI::BeamToFluidMeshtyingParams::BeamToFluidMeshtyingParams()
-    : isinit_(false),
-      issetup_(false),
-      constraint_enforcement_(FBI::BeamToFluidConstraintEnforcement::none),
+    : constraint_enforcement_(FBI::BeamToFluidConstraintEnforcement::none),
       meshtying_discretization_(FBI::BeamToFluidDiscretization::none),
       penalty_parameter_(-1.0),
       gauss_rule_(Core::FE::GaussRule1D::undefined),
       calcfluidweakdirichletforce_(false),
       mortar_shape_function_(FBI::BeamToFluidMeshtingMortarShapefunctions::none)
-{
-  // Empty Constructor.
-}
-
-/**
- *
- */
-void FBI::BeamToFluidMeshtyingParams::init()
 {
   // Teuchos parameter list for beam contact
   const Teuchos::ParameterList& beam_to_fluid_meshtying_params_list =
@@ -68,25 +58,9 @@ void FBI::BeamToFluidMeshtyingParams::init()
   gauss_rule_ = GeometryPair::int_to_gauss_rule1_d(
       beam_to_fluid_meshtying_params_list.sublist("BEAM TO FLUID MESHTYING")
           .get<int>("GAUSS_POINTS"));
-  isinit_ = true;
 
   // Create and get visualization output parameter
   output_params_ = std::make_shared<FBI::BeamToFluidMeshtyingVtkOutputParams>();
-  output_params_->init();
-  output_params_->setup();
-}
-
-
-/**
- *
- */
-void FBI::BeamToFluidMeshtyingParams::setup()
-{
-  check_init();
-
-  // Empty for now.
-
-  issetup_ = true;
 }
 
 FOUR_C_NAMESPACE_CLOSE
