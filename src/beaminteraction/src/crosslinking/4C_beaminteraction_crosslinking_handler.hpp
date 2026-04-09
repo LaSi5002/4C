@@ -47,13 +47,8 @@ namespace BeamInteraction
   {
    public:
     // constructor
-    BeamCrosslinkerHandler();
-
-    /// initialize linker handler
-    void init(int myrank, std::shared_ptr<Core::Binstrategy::BinningStrategy> binstrategy);
-
-    /// setup linker handler
-    void setup();
+    BeamCrosslinkerHandler(
+        int myrank, std::shared_ptr<Core::Binstrategy::BinningStrategy> binstrategy);
 
     // destructor
     virtual ~BeamCrosslinkerHandler() = default;

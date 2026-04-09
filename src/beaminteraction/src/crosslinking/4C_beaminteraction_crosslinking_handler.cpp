@@ -21,22 +21,11 @@ FOUR_C_NAMESPACE_OPEN
 
 /*----------------------------------------------------------------------*
  *----------------------------------------------------------------------*/
-BeamInteraction::BeamCrosslinkerHandler::BeamCrosslinkerHandler()
-    : binstrategy_(nullptr), myrank_(-1), bincolmap_(nullptr)
+BeamInteraction::BeamCrosslinkerHandler::BeamCrosslinkerHandler(
+    int myrank, std::shared_ptr<Core::Binstrategy::BinningStrategy> binstrategy)
+    : binstrategy_(binstrategy), myrank_(myrank), bincolmap_(nullptr)
 {
   // empty constructor
-}
-
-void BeamInteraction::BeamCrosslinkerHandler::init(
-    int myrank, std::shared_ptr<Core::Binstrategy::BinningStrategy> binstrategy)
-{
-  binstrategy_ = binstrategy;
-  myrank_ = myrank;
-}
-
-void BeamInteraction::BeamCrosslinkerHandler::setup()
-{
-  // so far nothing to do
 }
 
 /*----------------------------------------------------------------------*

@@ -208,9 +208,8 @@ void Solid::ModelEvaluator::BeamInteractionModelEvaluator::setup()
     // todo: move this and its single call during partition to crosslinker submodel
     if (have_sub_model_type(BeamInteraction::SubModelType::submodel_crosslinking))
     {
-      beam_crosslinker_handler_ = std::make_shared<BeamInteraction::BeamCrosslinkerHandler>();
-      beam_crosslinker_handler_->init(global_state().get_my_rank(), binstrategy_);
-      beam_crosslinker_handler_->setup();
+      beam_crosslinker_handler_ = std::make_shared<BeamInteraction::BeamCrosslinkerHandler>(
+          global_state().get_my_rank(), binstrategy_);
     }
 
     // some screen output for binning
