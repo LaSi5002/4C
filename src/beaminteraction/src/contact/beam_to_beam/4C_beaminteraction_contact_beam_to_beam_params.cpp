@@ -18,9 +18,7 @@ FOUR_C_NAMESPACE_OPEN
 /*----------------------------------------------------------------------------*
  *----------------------------------------------------------------------------*/
 BeamInteraction::BeamToBeamContactParams::BeamToBeamContactParams()
-    : isinit_(false),
-      issetup_(false),
-      penalty_law_(BeamInteraction::Contact::BeamToBeam::PenaltyLaw::pl_lp),
+    : penalty_law_(BeamInteraction::Contact::BeamToBeam::PenaltyLaw::pl_lp),
       btb_penalty_law_regularization_g0_(-1.0),
       btb_penalty_law_regularization_f0_(-1.0),
       btb_penalty_law_regularization_c0_(-1.0),
@@ -37,15 +35,6 @@ BeamInteraction::BeamToBeamContactParams::BeamToBeamContactParams()
       btb_endpoint_penalty_(false),
       btb_use_new_gap_function_(true)
 {
-  // empty constructor
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::BeamToBeamContactParams::init()
-{
-  issetup_ = false;
-
   // Teuchos parameter list for beam contact
   const Teuchos::ParameterList& beam_contact_params_list =
       Global::Problem::instance()->beam_interaction_params().sublist("BEAM TO BEAM CONTACT");
@@ -163,19 +152,6 @@ void BeamInteraction::BeamToBeamContactParams::init()
 
   /****************************************************************************/
   if (btb_basicstiff_gap_ != -1.0) FOUR_C_THROW("BEAMS_BASICSTIFFGAP currently not supported!");
-
-  isinit_ = true;
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::BeamToBeamContactParams::setup()
-{
-  check_init();
-
-  // empty for now
-
-  issetup_ = true;
 }
 
 FOUR_C_NAMESPACE_CLOSE

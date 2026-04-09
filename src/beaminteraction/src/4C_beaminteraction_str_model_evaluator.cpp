@@ -100,8 +100,6 @@ void Solid::ModelEvaluator::BeamInteractionModelEvaluator::setup()
   myrank_ = Core::Communication::my_mpi_rank(discret_ptr()->get_comm());
 
   beaminteraction_params_ptr_ = std::make_shared<BeamInteraction::BeamInteractionParams>();
-  beaminteraction_params_ptr_->init();
-  beaminteraction_params_ptr_->setup();
 
   // print logo
   logo();

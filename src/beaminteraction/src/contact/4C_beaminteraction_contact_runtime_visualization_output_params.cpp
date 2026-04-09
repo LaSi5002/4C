@@ -16,9 +16,7 @@ FOUR_C_NAMESPACE_OPEN
  *-----------------------------------------------------------------------------------------------*/
 BeamInteraction::BeamContactRuntimeVisualizationOutputParams::
     BeamContactRuntimeVisualizationOutputParams(const double restart_time)
-    : isinit_(false),
-      issetup_(false),
-      visualization_parameters_(Core::IO::visualization_parameters_factory(
+    : visualization_parameters_(Core::IO::visualization_parameters_factory(
           Global::Problem::instance()->io_params().sublist("RUNTIME VTK OUTPUT"),
           *Global::Problem::instance()->output_control_file(), restart_time)),
       output_interval_steps_(-1),
@@ -26,25 +24,6 @@ BeamInteraction::BeamContactRuntimeVisualizationOutputParams::
       output_forces_(false),
       output_gaps_(false)
 {
-  // empty constructor
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void BeamInteraction::BeamContactRuntimeVisualizationOutputParams::init()
-{
-  issetup_ = false;
-  // empty for now
-
-  isinit_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void BeamInteraction::BeamContactRuntimeVisualizationOutputParams::setup()
-{
-  throw_error_if_not_init();
-
   // Teuchos parameter list for beam contact
   const Teuchos::ParameterList& beam_contact_visualization_output_paramslist =
       Global::Problem::instance()
@@ -69,24 +48,6 @@ void BeamInteraction::BeamContactRuntimeVisualizationOutputParams::setup()
 
   output_angles_ = beam_contact_visualization_output_paramslist.get<bool>("CONTACT_ANGLE");
   output_types_ = beam_contact_visualization_output_paramslist.get<bool>("CONTACT_TYPE");
-
-
-  issetup_ = true;
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void BeamInteraction::BeamContactRuntimeVisualizationOutputParams::
-    throw_error_if_not_init_and_setup() const
-{
-  if (!is_init() or !is_setup()) FOUR_C_THROW("Call init() and setup() first!");
-}
-
-/*-----------------------------------------------------------------------------------------------*
- *-----------------------------------------------------------------------------------------------*/
-void BeamInteraction::BeamContactRuntimeVisualizationOutputParams::throw_error_if_not_init() const
-{
-  if (!is_init()) FOUR_C_THROW("init() has not been called, yet!");
 }
 
 FOUR_C_NAMESPACE_CLOSE

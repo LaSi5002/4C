@@ -22,37 +22,13 @@ FOUR_C_NAMESPACE_OPEN
 /*----------------------------------------------------------------------------*
  *----------------------------------------------------------------------------*/
 BeamInteraction::BeamInteractionParams::BeamInteractionParams()
-    : isinit_(false),
-      issetup_(false),
-      rep_strategy_(BeamInteraction::RepartitionStrategy::repstr_adaptive)
+    : rep_strategy_(BeamInteraction::RepartitionStrategy::repstr_adaptive)
 {
-  // empty constructor
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::BeamInteractionParams::init()
-{
-  issetup_ = false;
-
   Teuchos::ParameterList const& params_list =
       Global::Problem::instance()->beam_interaction_params();
 
   rep_strategy_ = Teuchos::getIntegralValue<BeamInteraction::RepartitionStrategy>(
       params_list, "REPARTITIONSTRATEGY");
-
-  isinit_ = true;
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::BeamInteractionParams::setup()
-{
-  check_init();
-
-  // empty for now
-
-  issetup_ = true;
 }
 
 

@@ -67,14 +67,8 @@ namespace Solid
     };
 
     //! Constructor for time integrators of general kind
-    ResultTest();
-
-    //! initialization of class variables
-    virtual void init(
+    ResultTest(
         const Solid::TimeInt::BaseDataGlobalState& gstate, const Solid::ModelEvaluator::Data& data);
-
-    //! setup of class variables
-    virtual void setup();
 
     //! \brief structure version of nodal value tests
     //!
@@ -110,22 +104,6 @@ namespace Solid
      */
     void test_special(const Core::IO::InputParameterContainer& container, int& nerr,
         int& test_count, int& uneval_test_count) override;
-
-   protected:
-    /// get the indicator state
-    inline const bool& is_init() const { return isinit_; };
-
-    /// get the indicator state
-    inline const bool& is_setup() const { return issetup_; };
-
-    /// Check if init() and setup() have been called
-    inline void check_init_setup() const
-    {
-      FOUR_C_ASSERT(is_init() and is_setup(), "Call init() and setup() first!");
-    }
-
-    /// Check if init() has been called
-    inline void check_init() const { FOUR_C_ASSERT(is_init(), "Call init() first!"); }
 
    private:
     /** \brief Get the result of the special structural quantity
@@ -206,13 +184,6 @@ namespace Solid
      *  \param[out] result  the nodal value
      *  \return     the flag indicates whether the node is in the current proc or not */
     int get_nodal_result(double& result, const int node, const std::string& position) const;
-
-   protected:
-    //! flag which indicates if the init() routine has already been called
-    bool isinit_;
-
-    //! flag which indicates if the setup() routine has already been called
-    bool issetup_;
 
    private:
     //! our discretisation

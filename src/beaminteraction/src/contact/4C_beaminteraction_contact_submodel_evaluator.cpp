@@ -68,8 +68,6 @@ void BeamInteraction::SubmodelEvaluator::BeamContact::setup()
 
   // build a new data container to manage beam interaction parameters
   beam_interaction_params_ptr_ = std::make_shared<BeamInteraction::BeamInteractionParams>();
-  beam_interaction_params_ptr_->init();
-  beam_interaction_params_ptr_->setup();
 
   // build a new data container to manage geometric search parameters
   geometric_search_params_ptr_ = std::make_shared<Core::GeometricSearch::GeometricSearchParams>(

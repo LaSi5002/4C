@@ -48,42 +48,10 @@ namespace BeamInteraction
     //! destructor
     virtual ~BeamInteractionParams() = default;
 
-    //! initialize with the stuff coming from input file
-    void init();
-
-    //! setup member variables
-    void setup();
-
-    //! returns the isinit_ flag
-    inline const bool& is_init() const { return isinit_; };
-
-    //! returns the issetup_ flag
-    inline const bool& is_setup() const { return issetup_; };
-
-    //! Checks the init and setup status
-    inline void check_init_setup() const
-    {
-      if (!is_init() or !is_setup()) FOUR_C_THROW("Call init() and setup() first!");
-    }
-
-    //! Checks the init status
-    inline void check_init() const
-    {
-      if (!is_init()) FOUR_C_THROW("init() has not been called, yet!");
-    }
-
     /// number of crosslinkers per type
-    BeamInteraction::RepartitionStrategy get_repartition_strategy() const
-    {
-      check_init_setup();
-      return rep_strategy_;
-    };
+    BeamInteraction::RepartitionStrategy get_repartition_strategy() const { return rep_strategy_; };
 
    private:
-    bool isinit_;
-
-    bool issetup_;
-
     /// number of crosslinker that are initially set
     BeamInteraction::RepartitionStrategy rep_strategy_;
   };

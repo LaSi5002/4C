@@ -133,45 +133,17 @@ namespace
 
 /*----------------------------------------------------------------------------*
  *----------------------------------------------------------------------------*/
-Solid::ResultTest::ResultTest()
-    : Core::Utils::ResultTest("STRUCTURE"),
-      isinit_(false),
-      issetup_(false),
-      strudisc_(nullptr),
-      disn_(nullptr),
-      veln_(nullptr),
-      accn_(nullptr),
-      reactn_(nullptr),
-      gstate_(nullptr)
-{
-  // empty constructor
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void Solid::ResultTest::init(
+Solid::ResultTest::ResultTest(
     const Solid::TimeInt::BaseDataGlobalState& gstate, const Solid::ModelEvaluator::Data& data)
+    : Core::Utils::ResultTest("STRUCTURE"),
+      strudisc_(gstate.get_discret()),
+      disn_(gstate.get_dis_n()),
+      veln_(gstate.get_vel_n()),
+      accn_(gstate.get_acc_n()),
+      reactn_(gstate.get_freact_n()),
+      gstate_(Core::Utils::shared_ptr_from_ref(gstate)),
+      data_(Core::Utils::shared_ptr_from_ref(data))
 {
-  issetup_ = false;
-
-  disn_ = gstate.get_dis_n();
-  veln_ = gstate.get_vel_n();
-  accn_ = gstate.get_acc_n();
-  reactn_ = gstate.get_freact_n();
-  gstate_ = Core::Utils::shared_ptr_from_ref(gstate);
-  data_ = Core::Utils::shared_ptr_from_ref(data);
-  strudisc_ = gstate.get_discret();
-
-  isinit_ = true;
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void Solid::ResultTest::setup()
-{
-  check_init();
-  // currently unused
-  issetup_ = true;
 }
 
 /*----------------------------------------------------------------------*/
@@ -179,8 +151,6 @@ void Solid::ResultTest::setup()
 void Solid::ResultTest::test_node(
     const Core::IO::InputParameterContainer& container, int& nerr, int& test_count)
 {
-  check_init_setup();
-
   // care for the case of multiple discretizations of the same field type
   std::string dis = container.get<std::string>("DIS");
   if (dis != strudisc_->name()) return;
@@ -375,8 +345,6 @@ int Solid::ResultTest::get_nodal_result(
 void Solid::ResultTest::test_node_on_geometry(const Core::IO::InputParameterContainer& container,
     int& nerr, int& test_count, const std::vector<std::vector<std::vector<int>>>& nodeset)
 {
-  check_init_setup();
-
   // care for the case of multiple discretizations of the same field type
   std::string dis = container.get<std::string>("DIS");
   if (dis != strudisc_->name()) return;
@@ -513,8 +481,6 @@ void Solid::ResultTest::test_node_on_geometry(const Core::IO::InputParameterCont
 void Solid::ResultTest::test_special(const Core::IO::InputParameterContainer& container, int& nerr,
     int& test_count, int& uneval_test_count)
 {
-  check_init_setup();
-
   std::string quantity = container.get<std::string>("QUANTITY");
 
   Status special_status = Status::unevaluated;

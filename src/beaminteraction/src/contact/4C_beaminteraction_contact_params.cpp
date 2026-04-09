@@ -36,8 +36,6 @@ BeamInteraction::BeamContactParams::BeamContactParams()
 void BeamInteraction::BeamContactParams::build_beam_to_beam_contact_params()
 {
   beam_to_beam_contact_params_ = std::make_shared<BeamInteraction::BeamToBeamContactParams>();
-  beam_to_beam_contact_params_->init();
-  beam_to_beam_contact_params_->setup();
 }
 
 
@@ -48,8 +46,6 @@ void BeamInteraction::BeamContactParams::build_beam_contact_runtime_output_param
 {
   beam_contact_runtime_output_params_ =
       std::make_shared<BeamInteraction::BeamContactRuntimeVisualizationOutputParams>(restart_time);
-  beam_contact_runtime_output_params_->init();
-  beam_contact_runtime_output_params_->setup();
 }
 
 /*----------------------------------------------------------------------------*
@@ -64,8 +60,6 @@ void BeamInteraction::BeamContactParams::build_beam_to_solid_edge_contact_params
 void BeamInteraction::BeamContactParams::build_beam_to_sphere_contact_params()
 {
   beam_to_sphere_contact_params_ = std::make_shared<BeamInteraction::BeamToSphereContactParams>();
-  beam_to_sphere_contact_params_->init();
-  beam_to_sphere_contact_params_->setup();
 }
 
 

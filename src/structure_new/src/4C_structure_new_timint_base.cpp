@@ -402,9 +402,8 @@ void Solid::TimeInt::Base::initialize_energy_file_stream_and_write_headers()
 std::shared_ptr<Core::Utils::ResultTest> Solid::TimeInt::Base::create_field_test()
 {
   check_init_setup();
-  std::shared_ptr<Solid::ResultTest> resulttest = std::make_shared<Solid::ResultTest>();
-  resulttest->init(get_data_global_state(), integrator().eval_data());
-  resulttest->setup();
+  std::shared_ptr<Solid::ResultTest> resulttest =
+      std::make_shared<Solid::ResultTest>(get_data_global_state(), integrator().eval_data());
 
   return resulttest;
 }
