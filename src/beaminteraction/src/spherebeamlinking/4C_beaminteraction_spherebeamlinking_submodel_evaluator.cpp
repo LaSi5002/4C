@@ -56,9 +56,8 @@ void BeamInteraction::SubmodelEvaluator::SphereBeamLinking::setup()
   check_init();
 
   // construct, init and setup data container for crosslinking
-  spherebeamlinking_params_ptr_ = std::make_shared<BeamInteraction::SphereBeamLinkingParams>();
-  spherebeamlinking_params_ptr_->init(g_state());
-  spherebeamlinking_params_ptr_->setup();
+  spherebeamlinking_params_ptr_ =
+      std::make_shared<BeamInteraction::SphereBeamLinkingParams>(g_state());
 
   random_number_sphere_beam_linking_step_ = -1;
 

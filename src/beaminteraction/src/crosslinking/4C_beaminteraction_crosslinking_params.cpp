@@ -19,10 +19,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*----------------------------------------------------------------------------*
  *----------------------------------------------------------------------------*/
-BeamInteraction::CrosslinkingParams::CrosslinkingParams()
-    : isinit_(false),
-      issetup_(false),
-      viscosity_(0.0),
+BeamInteraction::CrosslinkingParams::CrosslinkingParams(
+    Solid::TimeInt::BaseDataGlobalState const& gstate)
+    : viscosity_(0.0),
       kt_(0.0),
       deltatime_(0.0),
       init_box_(Core::LinAlg::Initialization::zero)
@@ -36,13 +35,6 @@ BeamInteraction::CrosslinkingParams::CrosslinkingParams()
   filamentbspotintervallocal_.clear();
   filamentbspotrangeglobal_.clear();
   filamentbspotrangelocal_.clear();
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::CrosslinkingParams::init(Solid::TimeInt::BaseDataGlobalState const& gstate)
-{
-  issetup_ = false;
 
   const Teuchos::ParameterList& crosslinking_params_list =
       Global::Problem::instance()->beam_interaction_params().sublist("CROSSLINKING");
@@ -359,20 +351,6 @@ void BeamInteraction::CrosslinkingParams::init(Solid::TimeInt::BaseDataGlobalSta
         FOUR_C_THROW("either local or global binding spot range can be specified");
     }
   }
-
-
-  isinit_ = true;
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::CrosslinkingParams::setup()
-{
-  check_init();
-
-  // empty for now
-
-  issetup_ = true;
 }
 
 FOUR_C_NAMESPACE_CLOSE

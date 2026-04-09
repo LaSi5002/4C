@@ -20,8 +20,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*----------------------------------------------------------------------------*
  *----------------------------------------------------------------------------*/
-BeamInteraction::SphereBeamLinkingParams::SphereBeamLinkingParams()
-    : isinit_(false), issetup_(false), deltatime_(-1.0), own_deltatime_(true)
+BeamInteraction::SphereBeamLinkingParams::SphereBeamLinkingParams(
+    Solid::TimeInt::BaseDataGlobalState const& gstate)
+    : deltatime_(-1.0), own_deltatime_(true)
 {
   mat_.clear();
   contractionrate_.clear();
@@ -32,14 +33,6 @@ BeamInteraction::SphereBeamLinkingParams::SphereBeamLinkingParams()
   filamentbspotintervallocal_.clear();
   filamentbspotrangeglobal_.clear();
   filamentbspotrangelocal_.clear();
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::SphereBeamLinkingParams::init(
-    Solid::TimeInt::BaseDataGlobalState const& gstate)
-{
-  issetup_ = false;
 
   const Teuchos::ParameterList& spherebeamlink_params_list =
       Global::Problem::instance()->beam_interaction_params().sublist("SPHERE BEAM LINK");
@@ -278,28 +271,12 @@ void BeamInteraction::SphereBeamLinkingParams::init(
         FOUR_C_THROW("either local or global binding spot range can be specified");
     }
   }
-
-
-  isinit_ = true;
-}
-
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
-void BeamInteraction::SphereBeamLinkingParams::setup()
-{
-  check_init();
-
-  // empty for now
-
-  issetup_ = true;
 }
 
 /*----------------------------------------------------------------------------*
  *----------------------------------------------------------------------------*/
 void BeamInteraction::SphereBeamLinkingParams::reset_time_step(double structure_delta_time)
 {
-  check_init_setup();
-
   if (not own_deltatime_) deltatime_ = structure_delta_time;
 }
 

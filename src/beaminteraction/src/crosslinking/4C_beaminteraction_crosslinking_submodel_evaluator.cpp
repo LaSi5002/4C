@@ -70,9 +70,8 @@ void BeamInteraction::SubmodelEvaluator::Crosslinking::setup()
   check_init();
 
   // construct, init and setup data container for crosslinking
-  crosslinking_params_ptr_ = std::make_shared<BeamInteraction::CrosslinkingParams>();
-  crosslinking_params_ptr_->init(g_state());
-  crosslinking_params_ptr_->setup();
+  crosslinking_params_ptr_ =
+      std::make_shared<BeamInteraction::CrosslinkingParams>(g_state());
 
   // set binding spot positions on filament elements according input file specifications
   set_filament_types();
