@@ -36,12 +36,6 @@ namespace BeamInteraction
      */
     BeamToSolidVolumeMeshtyingParams();
 
-
-    /**
-     * \brief Initialize with the stuff coming from input file.
-     */
-    void init() override;
-
     /**
      * \brief Returns the number of integration points along the circumference of the beams cross
      * section.

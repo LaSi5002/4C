@@ -34,12 +34,6 @@ namespace BeamInteraction
      */
     BeamToSolidSurfaceContactParams();
 
-
-    /**
-     * \brief Initialize with the stuff coming from input file.
-     */
-    void init() override;
-
     /**
      * \brief Returns true if the coupling should be evaluated with FAD.
      */

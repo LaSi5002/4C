@@ -18,9 +18,7 @@ FOUR_C_NAMESPACE_OPEN
  */
 BeamInteraction::BeamToSolidVolumeMeshtyingVisualizationOutputParams::
     BeamToSolidVolumeMeshtyingVisualizationOutputParams()
-    : isinit_(false),
-      issetup_(false),
-      output_interval_steps_(-1),
+    : output_interval_steps_(-1),
       output_every_iteration_(false),
       output_flag_(false),
       nodal_forces_(false),
@@ -31,25 +29,6 @@ BeamInteraction::BeamToSolidVolumeMeshtyingVisualizationOutputParams::
       integration_points_(false),
       write_unique_ids_(false)
 {
-  // empty constructor
-}
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidVolumeMeshtyingVisualizationOutputParams::init()
-{
-  issetup_ = false;
-  isinit_ = true;
-}
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidVolumeMeshtyingVisualizationOutputParams::setup()
-{
-  check_init();
-
   // Teuchos parameter lists from input file.
   const Teuchos::ParameterList& beam_to_solid_volume_meshtying_visualization_output_paramslist =
       Global::Problem::instance()
@@ -93,9 +72,6 @@ void BeamInteraction::BeamToSolidVolumeMeshtyingVisualizationOutputParams::setup
 
   write_unique_ids_ =
       beam_to_solid_volume_meshtying_visualization_output_paramslist.get<bool>("UNIQUE_IDS");
-
-  // Set the setup flag.
-  issetup_ = true;
 }
 
 FOUR_C_NAMESPACE_CLOSE

@@ -19,28 +19,18 @@ FOUR_C_NAMESPACE_OPEN
  *
  */
 BeamInteraction::BeamToSolidSurfaceMeshtyingParams::BeamToSolidSurfaceMeshtyingParams()
-    : BeamToSolidParamsBase(),
+    : BeamToSolidParamsBase(
+          Global::Problem::instance()->beam_interaction_params().sublist(
+              "BEAM TO SOLID SURFACE MESHTYING")),
       coupling_type_(BeamToSolid::BeamToSolidSurfaceCoupling::none),
       output_params_ptr_(nullptr),
       rotational_coupling_penalty_parameter_(-1.0),
       rotational_coupling_triad_construction_(BeamToSolid::BeamToSolidSurfaceRotationCoupling::none)
 {
-  // Empty Constructor.
-}
-
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidSurfaceMeshtyingParams::init()
-{
   // Teuchos parameter list for beam contact
   const Teuchos::ParameterList& beam_to_solid_surface_meshtying_params_list =
       Global::Problem::instance()->beam_interaction_params().sublist(
           "BEAM TO SOLID SURFACE MESHTYING");
-
-  // Set the common beam-to-solid parameters.
-  set_base_params(beam_to_solid_surface_meshtying_params_list);
 
   // Get parameters form input file.
   {
@@ -77,11 +67,7 @@ void BeamInteraction::BeamToSolidSurfaceMeshtyingParams::init()
   // Setup the output parameter object.
   {
     output_params_ptr_ = std::make_shared<BeamToSolidSurfaceVisualizationOutputParams>();
-    output_params_ptr_->init();
-    output_params_ptr_->setup();
   }
-
-  isinit_ = true;
 }
 
 /**

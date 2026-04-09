@@ -34,16 +34,6 @@ namespace BeamInteraction
     virtual ~BeamToSolidVolumeMeshtyingVisualizationOutputParams() = default;
 
     /**
-     * \brief Initialize with the stuff coming from input file.
-     */
-    void init();
-
-    /**
-     * \brief Setup member variables.
-     */
-    void setup();
-
-    /**
      * \brief Return the output every iteration flag.
      */
     bool get_output_every_iteration() const { return output_every_iteration_; }
@@ -53,7 +43,6 @@ namespace BeamInteraction
      */
     int output_interval_in_steps() const
     {
-      check_init_setup();
       return output_interval_steps_;
     };
 
@@ -108,30 +97,7 @@ namespace BeamInteraction
      * \brief Return the write unique IDs output flag.
      */
     bool get_write_unique_ids_flag() const { return write_unique_ids_; }
-
    protected:
-    /**
-     * \brief Checks the init and setup status.
-     */
-    inline void check_init_setup() const
-    {
-      if (!isinit_ or !issetup_) FOUR_C_THROW("Call init() and setup() first!");
-    }
-
-    /**
-     * \brief Checks the init status.
-     */
-    inline void check_init() const
-    {
-      if (!isinit_) FOUR_C_THROW("init() has not been called, yet!");
-    }
-
-    //! Flag if object is initialized.
-    bool isinit_;
-
-    //! Flag if object is set up.
-    bool issetup_;
-
     //! Output interval regarding steps: write output every INTERVAL_STEPS steps.
     int output_interval_steps_;
 

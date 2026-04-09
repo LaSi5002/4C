@@ -20,28 +20,18 @@ FOUR_C_NAMESPACE_OPEN
  *
  */
 BeamInteraction::BeamToSolidSurfaceContactParams::BeamToSolidSurfaceContactParams()
-    : BeamToSolidParamsBase(),
+    : BeamToSolidParamsBase(
+          Global::Problem::instance()->beam_interaction_params().sublist(
+              "BEAM TO SOLID SURFACE CONTACT")),
       contact_type_(BeamToSolid::BeamToSolidSurfaceContact::none),
       penalty_law_data_{},
       mortar_contact_configuration_(BeamToSolid::BeamToSolidSurfaceContactMortarDefinedIn::none),
       output_params_ptr_(nullptr)
 {
-  // Empty Constructor.
-}
-
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidSurfaceContactParams::init()
-{
   // Teuchos parameter list for beam contact
   const Teuchos::ParameterList& beam_to_solid_contact_params_list =
       Global::Problem::instance()->beam_interaction_params().sublist(
           "BEAM TO SOLID SURFACE CONTACT");
-
-  // Set the common beam-to-solid parameters.
-  set_base_params(beam_to_solid_contact_params_list);
 
   // Get parameters form input file.
   {
@@ -64,11 +54,7 @@ void BeamInteraction::BeamToSolidSurfaceContactParams::init()
   // Setup the output parameter object.
   {
     output_params_ptr_ = std::make_shared<BeamToSolidSurfaceVisualizationOutputParams>();
-    output_params_ptr_->init();
-    output_params_ptr_->setup();
   }
-
-  isinit_ = true;
 }
 
 

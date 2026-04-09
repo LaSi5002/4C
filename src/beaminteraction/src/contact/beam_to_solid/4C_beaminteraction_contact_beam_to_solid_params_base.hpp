@@ -29,55 +29,12 @@ namespace BeamInteraction
     /**
      * \brief Constructor.
      */
-    BeamToSolidParamsBase();
+    explicit BeamToSolidParamsBase(const Teuchos::ParameterList& beam_to_solid_params_list);
 
     /**
      * \brief Destructor.
      */
     virtual ~BeamToSolidParamsBase() = default;
-
-    /**
-     * \brief Initialize with the stuff coming from input file.
-     */
-    virtual void init() = 0;
-
-    /**
-     * \brief Set the common beam-to-solid parameters.
-     * @param beam_to_solid_params_list (in) parameter list with the common beam-to-solid
-     * parameters.
-     */
-    virtual void set_base_params(const Teuchos::ParameterList& beam_to_solid_params_list);
-
-    /**
-     * \brief Setup member variables.
-     */
-    void setup();
-
-    /**
-     * \brief Returns the isinit_ flag.
-     */
-    inline const bool& is_init() const { return isinit_; };
-
-    /**
-     * \brief Returns the issetup_ flag.
-     */
-    inline const bool& is_setup() const { return issetup_; };
-
-    /**
-     * \brief Checks the init and setup status.
-     */
-    inline void check_init_setup() const
-    {
-      if (!is_init() or !is_setup()) FOUR_C_THROW("Call init() and setup() first!");
-    }
-
-    /**
-     * \brief Checks the init status.
-     */
-    inline void check_init() const
-    {
-      if (!is_init()) FOUR_C_THROW("init() has not been called, yet!");
-    }
 
     /**
      * \brief Returns the contact discretization method.
@@ -155,12 +112,6 @@ namespace BeamInteraction
     [[nodiscard]] bool is_rotational_coupling() const { return rotational_coupling_; }
 
    protected:
-    //! Flag if Init was called.
-    bool isinit_;
-
-    //! Flag if Setup was called.
-    bool issetup_;
-
     //! Enforcement strategy for constraints.
     BeamToSolid::BeamToSolidConstraintEnforcement constraint_enforcement_;
 

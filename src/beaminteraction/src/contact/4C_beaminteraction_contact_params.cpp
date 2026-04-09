@@ -69,8 +69,6 @@ void BeamInteraction::BeamContactParams::build_beam_to_solid_volume_meshtying_pa
 {
   beam_to_solid_volume_meshtying_params_ =
       std::make_shared<BeamInteraction::BeamToSolidVolumeMeshtyingParams>();
-  beam_to_solid_volume_meshtying_params_->init();
-  beam_to_solid_volume_meshtying_params_->setup();
 }
 
 /*----------------------------------------------------------------------------*
@@ -79,8 +77,6 @@ void BeamInteraction::BeamContactParams::build_beam_to_solid_surface_meshtying_p
 {
   beam_to_solid_surface_meshtying_params_ =
       std::make_shared<BeamInteraction::BeamToSolidSurfaceMeshtyingParams>();
-  beam_to_solid_surface_meshtying_params_->init();
-  beam_to_solid_surface_meshtying_params_->setup();
 }
 
 /*----------------------------------------------------------------------------*
@@ -89,8 +85,6 @@ void BeamInteraction::BeamContactParams::build_beam_to_solid_surface_contact_par
 {
   beam_to_solid_surface_contact_params_ =
       std::make_shared<BeamInteraction::BeamToSolidSurfaceContactParams>();
-  beam_to_solid_surface_contact_params_->init();
-  beam_to_solid_surface_contact_params_->setup();
 }
 
 FOUR_C_NAMESPACE_CLOSE

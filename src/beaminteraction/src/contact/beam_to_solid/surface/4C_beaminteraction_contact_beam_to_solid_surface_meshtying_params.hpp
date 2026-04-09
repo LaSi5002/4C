@@ -35,12 +35,6 @@ namespace BeamInteraction
      */
     BeamToSolidSurfaceMeshtyingParams();
 
-
-    /**
-     * \brief Initialize with the stuff coming from input file.
-     */
-    void init() override;
-
     /**
      * \brief Returns the coupling type for beam-to-surface coupling.
      */

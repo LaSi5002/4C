@@ -228,9 +228,8 @@ void Solid::ModelEvaluator::Data::setup()
       }
       case Inpar::Solid::model_browniandyn:
       {
-        browniandyn_data_ptr_ = std::make_shared<BrownianDynData>();
-        browniandyn_data_ptr_->init(Core::Utils::shared_ptr_from_ref(*this));
-        browniandyn_data_ptr_->setup();
+        browniandyn_data_ptr_ =
+            std::make_shared<BrownianDynData>(Core::Utils::shared_ptr_from_ref(*this));
         break;
       }
       default:

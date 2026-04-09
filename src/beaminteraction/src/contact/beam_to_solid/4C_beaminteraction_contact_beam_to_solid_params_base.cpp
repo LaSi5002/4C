@@ -18,10 +18,9 @@ FOUR_C_NAMESPACE_OPEN
 /**
  *
  */
-BeamInteraction::BeamToSolidParamsBase::BeamToSolidParamsBase()
-    : isinit_(false),
-      issetup_(false),
-      constraint_enforcement_(BeamToSolid::BeamToSolidConstraintEnforcement::none),
+BeamInteraction::BeamToSolidParamsBase::BeamToSolidParamsBase(
+    const Teuchos::ParameterList& beam_to_solid_params_list)
+    : constraint_enforcement_(BeamToSolid::BeamToSolidConstraintEnforcement::none),
       contact_discretization_(BeamToSolid::BeamToSolidContactDiscretization::none),
       mortar_shape_function_(BeamToSolid::BeamToSolidMortarShapefunctions::none),
       penalty_parameter_(-1.0),
@@ -30,16 +29,6 @@ BeamInteraction::BeamToSolidParamsBase::BeamToSolidParamsBase()
       gauss_rule_(Core::FE::GaussRule1D::undefined),
       rotational_coupling_(false),
       lagrange_formulation_(BeamToSolid::BeamToSolidLagrangeFormulation::none)
-{
-  // Empty Constructor.
-}
-
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidParamsBase::set_base_params(
-    const Teuchos::ParameterList& beam_to_solid_params_list)
 {
   // Get parameters form input file.
   {
@@ -85,21 +74,6 @@ void BeamInteraction::BeamToSolidParamsBase::set_base_params(
     gauss_rule_ =
         GeometryPair::int_to_gauss_rule1_d(beam_to_solid_params_list.get<int>("GAUSS_POINTS"));
   }
-
-  isinit_ = true;
-}
-
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidParamsBase::setup()
-{
-  check_init();
-
-  // Empty for now.
-
-  issetup_ = true;
 }
 
 FOUR_C_NAMESPACE_CLOSE

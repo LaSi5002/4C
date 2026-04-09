@@ -1237,25 +1237,18 @@ namespace Solid
     {
      public:
       //! constructor
-      BrownianDynData();
-
-      //! initialize the stuff coming from outside
-      void init(std::shared_ptr<const Solid::ModelEvaluator::Data> const& str_data_ptr);
-
-      //! setup member variables
-      void setup();
+      explicit BrownianDynData(
+          std::shared_ptr<const Solid::ModelEvaluator::Data> const& str_data_ptr);
 
       //! Structural dynamic data
       inline Solid::TimeInt::BaseDataSDyn const& sdyn() const
       {
-        check_init();
         return str_data_ptr_->sdyn();
       }
 
       /// thermal energy
       double const& kt() const
       {
-        check_init_setup();
         return kt_;
       };
 
@@ -1266,21 +1259,18 @@ namespace Solid
       //! get mutable random force vector
       std::shared_ptr<Core::LinAlg::MultiVector<double>>& get_random_forces()
       {
-        check_init_setup();
         return randomforces_;
       };
 
       /// ~ 1e-3 / 2.27 according to cyron2011 eq 52 ff, viscosity of surrounding fluid
       double const& max_rand_force() const
       {
-        check_init_setup();
         return maxrandforce_;
       };
 
       /// thermal energy
       double const& time_step_const_rand_numb() const
       {
-        check_init_setup();
         return timeintconstrandnumb_;
       };
       //! @}
@@ -1290,14 +1280,12 @@ namespace Solid
       //! @{
       std::shared_ptr<Core::LinAlg::MultiVector<double>> const& get_random_forces() const override
       {
-        check_init_setup();
         return randomforces_;
       };
 
       /// ~ 1e-3 / 2.27 according to cyron2011 eq 52 ff, viscosity of surrounding fluid
       double const& get_viscosity() const override
       {
-        check_init_setup();
         return viscosity_;
       };
 
@@ -1305,7 +1293,6 @@ namespace Solid
       [[nodiscard]] BrownianDynamics::BeamDampingCoefficientSpecificationType
       how_beam_damping_coefficients_are_specified() const override
       {
-        check_init_setup();
         return beam_damping_coeff_specified_via_;
       }
 
@@ -1313,7 +1300,6 @@ namespace Solid
       [[nodiscard]] std::array<double, 3> const&
       get_beam_damping_coefficient_prefactors_from_input_file() const override
       {
-        check_init_setup();
         return beams_damping_coefficient_prefactors_perunitlength_;
       };
 
@@ -1321,35 +1307,11 @@ namespace Solid
       [[nodiscard]] std::shared_ptr<Core::Geo::MeshFree::BoundingBox> const&
       get_periodic_bounding_box() const override
       {
-        check_init_setup();
         return str_data_ptr_->sdyn().get_periodic_bounding_box();
       }
       //! @}
 
-     protected:
-      //! returns the isinit_ flag
-      inline const bool& is_init() const { return isinit_; };
-
-      //! returns the issetup_ flag
-      inline const bool& is_setup() const { return issetup_; };
-
-      //! Checks the init and setup status
-      inline void check_init_setup() const
-      {
-        FOUR_C_ASSERT(is_init() and is_setup(), "Call init() and setup() first!");
-      }
-
-      //! Checks the init status
-      inline void check_init() const
-      {
-        FOUR_C_ASSERT(is_init(), "init() has not been called, yet!");
-      }
-
      private:
-      bool isinit_;
-
-      bool issetup_;
-
       std::shared_ptr<const Solid::ModelEvaluator::Data> str_data_ptr_;
 
       /// ~ 1e-3 / 2.27 according to cyron2011 eq 52 ff, viscosity of surrounding fluid

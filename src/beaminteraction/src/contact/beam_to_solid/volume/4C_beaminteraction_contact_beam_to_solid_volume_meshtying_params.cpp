@@ -21,7 +21,9 @@ FOUR_C_NAMESPACE_OPEN
  *
  */
 BeamInteraction::BeamToSolidVolumeMeshtyingParams::BeamToSolidVolumeMeshtyingParams()
-    : BeamToSolidParamsBase(),
+    : BeamToSolidParamsBase(
+          Global::Problem::instance()->beam_interaction_params().sublist(
+              "BEAM TO SOLID VOLUME MESHTYING")),
       integration_points_circumference_(0),
       n_fourier_modes_(-1),
       rotational_coupling_triad_construction_(BeamToSolid::BeamToSolidRotationCoupling::none),
@@ -29,22 +31,10 @@ BeamInteraction::BeamToSolidVolumeMeshtyingParams::BeamToSolidVolumeMeshtyingPar
       output_params_ptr_(nullptr),
       couple_restart_state_(false)
 {
-  // Empty Constructor.
-}
-
-
-/**
- *
- */
-void BeamInteraction::BeamToSolidVolumeMeshtyingParams::init()
-{
   // Teuchos parameter list for beam contact
   const Teuchos::ParameterList& beam_to_solid_contact_params_list =
       Global::Problem::instance()->beam_interaction_params().sublist(
           "BEAM TO SOLID VOLUME MESHTYING");
-
-  // Set the common beam-to-solid parameters.
-  set_base_params(beam_to_solid_contact_params_list);
 
   // Get parameters form input file.
   {
@@ -84,16 +74,12 @@ void BeamInteraction::BeamToSolidVolumeMeshtyingParams::init()
   // Setup the output parameter object.
   {
     output_params_ptr_ = std::make_shared<BeamToSolidVolumeMeshtyingVisualizationOutputParams>();
-    output_params_ptr_->init();
-    output_params_ptr_->setup();
   }
 
   // Sanity checks.
   if (rotational_coupling_ and couple_restart_state_)
     FOUR_C_THROW(
         "Coupling restart state combined with rotational coupling is not yet implemented!");
-
-  isinit_ = true;
 }
 
 /**

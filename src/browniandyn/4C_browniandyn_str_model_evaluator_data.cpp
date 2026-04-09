@@ -18,10 +18,9 @@ FOUR_C_NAMESPACE_OPEN
 
 /*----------------------------------------------------------------------*
  *----------------------------------------------------------------------*/
-Solid::ModelEvaluator::BrownianDynData::BrownianDynData()
-    : isinit_(false),
-      issetup_(false),
-      str_data_ptr_(nullptr),
+Solid::ModelEvaluator::BrownianDynData::BrownianDynData(
+    const std::shared_ptr<const Solid::ModelEvaluator::Data>& str_data_ptr)
+    : str_data_ptr_(str_data_ptr),
       viscosity_(0.0),
       kt_(0.0),
       maxrandforce_(0.0),
@@ -30,18 +29,6 @@ Solid::ModelEvaluator::BrownianDynData::BrownianDynData()
       beams_damping_coefficient_prefactors_perunitlength_{0.0, 0.0, 0.0},
       randomforces_(nullptr)
 {
-  // empty constructor
-}
-
-/*----------------------------------------------------------------------*
- *----------------------------------------------------------------------*/
-void Solid::ModelEvaluator::BrownianDynData::init(
-    const std::shared_ptr<const Solid::ModelEvaluator::Data>& str_data_ptr)
-{
-  issetup_ = false;
-
-  str_data_ptr_ = str_data_ptr;
-
   const Teuchos::ParameterList& browndyn_params_list =
       Global::Problem::instance()->brownian_dynamics_params();
 
@@ -87,23 +74,6 @@ void Solid::ModelEvaluator::BrownianDynData::init(
   {
     FOUR_C_THROW("The way how beam damping coefficients are specified is not properly set!");
   }
-
-  // set flag
-  isinit_ = true;
-
-  return;
-}
-
-/*----------------------------------------------------------------------*
- *----------------------------------------------------------------------*/
-void Solid::ModelEvaluator::BrownianDynData::setup()
-{
-  check_init();
-
-  // set flag
-  issetup_ = true;
-
-  return;
 }
 
 /*----------------------------------------------------------------------*
@@ -111,8 +81,6 @@ void Solid::ModelEvaluator::BrownianDynData::setup()
 void Solid::ModelEvaluator::BrownianDynData::resize_random_force_m_vector(
     std::shared_ptr<Core::FE::Discretization> discret_ptr, int maxrandnumelement)
 {
-  check_init_setup();
-
   // resize in case of new crosslinkers that were set and are now part of the discretization
   randomforces_ = std::make_shared<Core::LinAlg::MultiVector<double>>(
       *(discret_ptr->element_col_map()), maxrandnumelement, true);
