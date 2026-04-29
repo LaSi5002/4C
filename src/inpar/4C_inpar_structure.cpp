@@ -11,6 +11,7 @@
 #include "4C_fem_condition_definition.hpp"
 #include "4C_io_input_spec.hpp"
 #include "4C_io_input_spec_builders.hpp"
+#include "4C_rebalance.hpp"
 #include "4C_utils_enum.hpp"
 FOUR_C_NAMESPACE_OPEN
 
@@ -427,6 +428,42 @@ namespace Inpar
                   {.description = "Function for Initial displacement", .default_value = -1})},
           {.required =
                   false})); /*--------------------------------------------------------------------*/
+      specs.push_back(group("STRUCTURAL DYNAMIC/DYNAMIC REBALANCE",
+          {
+              parameter<bool>("ENABLED",
+                  {.description = "Enable timing-based dynamic redistribution for pure structure "
+                                  "problems in the standard time loop.",
+                      .default_value = false}),
+              parameter<double>("IMBALANCE_THRESHOLD",
+                  {.description = "Trigger redistribution if the rolling average of the "
+                                  "max-to-min rank evaluation time ratio exceeds this value.",
+                      .default_value = 1.5}),
+              parameter<int>("WINDOW_STEPS",
+                  {.description =
+                          "Number of converged steps used in the rolling imbalance average.",
+                      .default_value = 3}),
+              parameter<int>("COOLDOWN_STEPS",
+                  {.description = "Minimum number of converged steps between redistributions.",
+                      .default_value = 3}),
+              parameter<double>("IMBALANCE_TOL",
+                  {.description = "Target imbalance tolerance passed to the repartitioner.",
+                      .default_value = 1.1}),
+              parameter<int>("MIN_ELE_PER_PROC",
+                  {.description = "Minimum number of elements per processor during redistribution.",
+                      .default_value = 0}),
+              deprecated_selection<Core::Rebalance::RebalanceType>("REBALANCE_TYPE",
+                  {
+                      {"Hypergraph", Core::Rebalance::RebalanceType::hypergraph},
+                      {"hypergraph", Core::Rebalance::RebalanceType::hypergraph},
+                      {"Multijagged", Core::Rebalance::RebalanceType::multijagged},
+                      {"multijagged", Core::Rebalance::RebalanceType::multijagged},
+                      {"Monolithic", Core::Rebalance::RebalanceType::monolithic},
+                      {"monolithic", Core::Rebalance::RebalanceType::monolithic},
+                  },
+                  {.description = "Partitioning algorithm used for dynamic redistribution.",
+                      .default_value = Core::Rebalance::RebalanceType::hypergraph}),
+          },
+          {.required = false}));
       /* parameters for time step size adaptivity in structural dynamics */
       specs.push_back(group("STRUCTURAL DYNAMIC/TIMEADAPTIVITY",
           {

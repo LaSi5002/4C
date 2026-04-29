@@ -17,6 +17,9 @@
 #include "4C_utils_fad.hpp"
 
 #include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -81,10 +84,9 @@ void Mat::Viscoplastic::Anand::setup(const int numgp, const Discret::Elements::F
 
 /*--------------------------------------------------------------------*
  *--------------------------------------------------------------------*/
-void Mat::Viscoplastic::Anand::pre_evaluate(
-    const Teuchos::ParameterList& params, const int gp, const int ele_gid)
+void Mat::Viscoplastic::Anand::pre_evaluate(const Teuchos::ParameterList& params, int gp)
 {  // call pre_evaluate of base class
-  Mat::Viscoplastic::Law::pre_evaluate(params, gp, ele_gid);
+  Mat::Viscoplastic::Law::pre_evaluate(params, gp);
 
   // set the last_substep_ values to the last_ values (because the preevaluation method is called
   // before substepping)
@@ -259,9 +261,10 @@ double Mat::Viscoplastic::Anand::evaluate_plastic_strain_rate(const double equiv
 
 /*--------------------------------------------------------------------*
  *--------------------------------------------------------------------*/
-Core::LinAlg::Matrix<2, 1> Mat::Viscoplastic::Anand::evaluate_derivatives_of_plastic_strain_rate(
-    const double equiv_stress, const double equiv_plastic_strain, const double dt,
-    const double max_plastic_strain_deriv, ErrorType& err_status, const bool update_hist_var)
+Mat::Viscoplastic::Anand::PlasticStrainRateDerivs
+Mat::Viscoplastic::Anand::evaluate_derivatives_of_plastic_strain_rate(const double equiv_stress,
+    const double equiv_plastic_strain, const double dt, const double max_plastic_strain_deriv,
+    ErrorType& err_status, const bool update_hist_var)
 {
   // first set error status to "no errors"
   err_status = ErrorType::no_errors;
@@ -271,13 +274,14 @@ Core::LinAlg::Matrix<2, 1> Mat::Viscoplastic::Anand::evaluate_derivatives_of_pla
   if (equiv_plastic_strain < 0.0)
   {
     err_status = ErrorType::negative_plastic_strain;
-    return Core::LinAlg::Matrix<2, 1>{Core::LinAlg::Initialization::zero};
+    return PlasticStrainRateDerivs{.deriv_equiv_stress = 0.0, .deriv_plastic_strain = 0.0};
   }
 
   // computation of derivatives
 
   // first we set derivatives to 0
-  Core::LinAlg::Matrix<2, 1> equiv_plastic_strain_rate_ders(Core::LinAlg::Initialization::zero);
+  PlasticStrainRateDerivs equiv_plastic_strain_rate_ders{
+      .deriv_equiv_stress = 0.0, .deriv_plastic_strain = 0.0};
 
   // then we check the yield condition
   if (equiv_stress > rel_stress_eval_tol * time_step_quantities_.last_substep_flow_resistance_[gp_])
@@ -302,7 +306,7 @@ Core::LinAlg::Matrix<2, 1> Mat::Viscoplastic::Anand::evaluate_derivatives_of_pla
     if (err_status != ErrorType::no_errors)
     {
       err_status = ErrorType::failed_computation_flow_resistance;
-      return Core::LinAlg::Matrix<2, 1>{Core::LinAlg::Initialization::zero};
+      return PlasticStrainRateDerivs{.deriv_equiv_stress = 0.0, .deriv_plastic_strain = 0.0};
     }
 
     // get signs of the derivatives
@@ -344,12 +348,12 @@ Core::LinAlg::Matrix<2, 1> Mat::Viscoplastic::Anand::evaluate_derivatives_of_pla
         (log_dt + log_deriv_eps > log_max_plastic_strain_deriv))
     {
       err_status = ErrorType::overflow_error;
-      return Core::LinAlg::Matrix<2, 1>{Core::LinAlg::Initialization::zero};
+      return PlasticStrainRateDerivs{.deriv_equiv_stress = 0.0, .deriv_plastic_strain = 0.0};
     }
 
     // compute the exact derivatives using these logarithms
-    equiv_plastic_strain_rate_ders(0, 0) = signum_temp * std::exp(log_deriv_sigma);
-    equiv_plastic_strain_rate_ders(1, 0) =
+    equiv_plastic_strain_rate_ders.deriv_equiv_stress = signum_temp * std::exp(log_deriv_sigma);
+    equiv_plastic_strain_rate_ders.deriv_plastic_strain =
         -signum_d_flow_res_d_plastic_strain * std::exp(log_deriv_eps);
   }
 

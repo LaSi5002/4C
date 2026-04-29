@@ -835,7 +835,12 @@ std::unique_ptr<Core::IO::MeshReader> Global::read_discretization(
             ->io_params()
             .sublist("RUNTIME VTK OUTPUT")
             .get<bool>("ELEMENT_EVAL_TIME") or
-        Global::Problem::instance()->io_params().get<bool>("PER_RANK_EVAL_TIME"));
+        Global::Problem::instance()->io_params().get<bool>("PER_RANK_EVAL_TIME") or
+        (problem.get_problem_type() == Core::ProblemType::structure and
+            Global::Problem::instance()
+                ->structural_dynamic_params()
+                .sublist("DYNAMIC REBALANCE")
+                .get<bool>("ENABLED")));
 
     problem.add_dis(name, dis);
 
