@@ -32,16 +32,24 @@ int Adapter::StructureTimeLoop::integrate()
   Inpar::Solid::ConvergenceStatus convergencestatus = Inpar::Solid::conv_success;
   const Teuchos::ParameterList& rebalance_params =
       Global::Problem::instance()->structural_dynamic_params().sublist("DYNAMIC REBALANCE");
-  const bool dynamic_rebalance_enabled = rebalance_params.get<bool>("ENABLED");
-  const int window_steps = std::max(1, rebalance_params.get<int>("WINDOW_STEPS"));
-  const int cooldown_steps = std::max(0, rebalance_params.get<int>("COOLDOWN_STEPS"));
-  const double imbalance_threshold = rebalance_params.get<double>("IMBALANCE_THRESHOLD");
+  const struct
+  {
+    bool enabled;
+    int window_steps;
+    int cooldown_steps;
+    double imbalance_threshold;
+  } rebalance_trigger = {
+      .enabled = rebalance_params.get<bool>("ENABLED"),
+      .window_steps = std::max(1, rebalance_params.get<int>("WINDOW_STEPS")),
+      .cooldown_steps = std::max(0, rebalance_params.get<int>("COOLDOWN_STEPS")),
+      .imbalance_threshold = rebalance_params.get<double>("IMBALANCE_THRESHOLD"),
+  };
   std::deque<double> imbalance_history;
   int last_rebalance_step = std::numeric_limits<int>::min() / 2;
 
   auto maybe_rebalance = [&]()
   {
-    if (!dynamic_rebalance_enabled) return;
+    if (!rebalance_trigger.enabled) return;
 
     auto* timint = dynamic_cast<Solid::TimeInt::Base*>(structure_.get());
     if (timint == nullptr) return;
@@ -54,21 +62,22 @@ int Adapter::StructureTimeLoop::integrate()
 
     const double imbalance = *max_it / std::max(*min_it, 1.0e-12);
     imbalance_history.push_back(imbalance);
-    while (static_cast<int>(imbalance_history.size()) > window_steps) imbalance_history.pop_front();
+    while (static_cast<int>(imbalance_history.size()) > rebalance_trigger.window_steps)
+      imbalance_history.pop_front();
 
-    if (static_cast<int>(imbalance_history.size()) < window_steps) return;
+    if (static_cast<int>(imbalance_history.size()) < rebalance_trigger.window_steps) return;
 
     const double averaged_imbalance =
         std::accumulate(imbalance_history.begin(), imbalance_history.end(), 0.0) /
         static_cast<double>(imbalance_history.size());
-    if (averaged_imbalance <= imbalance_threshold) return;
+    if (averaged_imbalance <= rebalance_trigger.imbalance_threshold) return;
 
     const int current_step = timint->get_step_n();
-    if (current_step - last_rebalance_step < cooldown_steps) return;
+    if (current_step - last_rebalance_step < rebalance_trigger.cooldown_steps) return;
 
     Core::IO::cout << "====== Dynamic structure redistribution triggered after step "
                    << current_step << " (rolling imbalance " << averaged_imbalance << ", threshold "
-                   << imbalance_threshold << ")" << Core::IO::endl;
+                   << rebalance_trigger.imbalance_threshold << ")" << Core::IO::endl;
 
     if (timint->perform_dynamic_rebalance())
     {
