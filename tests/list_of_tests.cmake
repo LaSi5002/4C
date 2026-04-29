@@ -2046,6 +2046,8 @@ four_c_test_add_csv_yaml_comparison(BASED_ON ${current} RESULT_FILE xxx_full_map
 four_c_test(TEST_FILE ssi_mono_3D_1hex8_scatra.4C.yaml NP 3)
 four_c_test(TEST_FILE ssi_mono_3D_1hex8_scatra_intensive.4C.yaml NP 3)
 four_c_test(TEST_FILE ssi_mono_3D_1hex8_scatra_linaniso_growthlaw.4C.yaml NP 3)
+four_c_test(TEST_FILE mat_iso_viscoplast_refJC_3hex8.4C.yaml RETURN_AS current)
+four_c_test_add_csv_header_check(BASED_ON ${current} RESULT_FILE xxx-rank_eval_time.csv HEADERS step time RankEvalTime)
 four_c_test(TEST_FILE ssi_mono_3D_27hex8_scatra_BGS-AMG_2x2.4C.yaml NP 3 RETURN_AS current)
 four_c_test_restart(BASED_ON ${current} SAME_FILE NP 3 RESTART_STEP 5)
 four_c_test(TEST_FILE ssi_mono_3D_289tet4_scatra.4C.yaml NP 3 RETURN_AS current)
