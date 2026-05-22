@@ -23,6 +23,8 @@
 #include <Zoltan2_XpetraCrsGraphAdapter.hpp>
 #include <Zoltan2_XpetraMultiVectorAdapter.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <utility>
 
 FOUR_C_NAMESPACE_OPEN
@@ -159,13 +161,25 @@ Core::Rebalance::rebalance_coordinates(const Core::LinAlg::MultiVector<double>& 
 /*----------------------------------------------------------------------*/
 std::pair<std::shared_ptr<Core::LinAlg::Vector<double>>,
     std::shared_ptr<Core::LinAlg::SparseMatrix>>
-Core::Rebalance::build_weights(const Core::FE::Discretization& dis)
+Core::Rebalance::build_weights(
+    const Core::FE::Discretization& dis, WeightingStrategy weighting_strategy)
 {
   const Core::LinAlg::Map* noderowmap = dis.node_row_map();
 
-  auto crs_ge_weights = std::make_shared<Core::LinAlg::SparseMatrix>(*noderowmap, 15);
+  std::shared_ptr<Core::LinAlg::SparseMatrix> crs_ge_weights =
+      (weighting_strategy == WeightingStrategy::measured_eval_time)
+          ? nullptr
+          : std::make_shared<Core::LinAlg::SparseMatrix>(*noderowmap, 15);
   std::shared_ptr<Core::LinAlg::Vector<double>> vweights =
       std::make_shared<Core::LinAlg::Vector<double>>(*noderowmap, true);
+
+  if (weighting_strategy == WeightingStrategy::measured_eval_time)
+  {
+    // Keep every vertex strictly positive. After redistribution, some owned row nodes may receive
+    // no contribution from local row elements. Use a unit baseline here rather than an epsilon:
+    // PHG has proven sensitive both to zeros and to extremely tiny positive fallback weights.
+    vweights->put_scalar(1.0);
+  }
 
   // loop all row elements and get their cost of evaluation
   for (int i = 0; i < dis.element_row_map()->num_my_elements(); ++i)
@@ -185,14 +199,21 @@ Core::Rebalance::build_weights(const Core::FE::Discretization& dis)
     Core::LinAlg::SerialDenseMatrix edgeweigths_ele;
     Core::LinAlg::SerialDenseVector nodeweights_ele;
 
-    // evaluate elements to get their evaluation cost
     ele->nodal_connectivity(edgeweigths_ele, nodeweights_ele);
 
-    Core::LinAlg::assemble(*crs_ge_weights, edgeweigths_ele, lm, lmrowowner, lm);
+    if (weighting_strategy == WeightingStrategy::measured_eval_time)
+    {
+      // Temporary sanity check: disable measured timing influence and use uniform
+      // positive vertex weights to isolate PHG stability from the eval-time signal.
+      for (int n = 0; n < numnode; ++n) nodeweights_ele[n] = 1.0;
+    }
+
+    if (crs_ge_weights != nullptr)
+      Core::LinAlg::assemble(*crs_ge_weights, edgeweigths_ele, lm, lmrowowner, lm);
     Core::LinAlg::assemble(*vweights, nodeweights_ele, lm, lmrowowner);
   }
 
-  crs_ge_weights->complete();
+  if (crs_ge_weights != nullptr) crs_ge_weights->complete();
 
   return {vweights, crs_ge_weights};
 }

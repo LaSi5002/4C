@@ -98,8 +98,6 @@ void Solid::Integrator::setup()
   // the issetup_ flag is not set here!!!
 }
 
-/*----------------------------------------------------------------------------*
- *----------------------------------------------------------------------------*/
 void Solid::Integrator::set_initial_displacement(
     const Inpar::Solid::InitialDisp init, const int startfuncno)
 {

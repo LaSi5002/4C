@@ -70,6 +70,9 @@ namespace Solid
       /// (e.g. compute mass matrix, initial accelerations, ...)
       void post_setup() override;
 
+      /// Redistribute a pure structure discretization using measured evaluation times.
+      bool perform_dynamic_rebalance();
+
       /// tests if there are more time steps to do
       [[nodiscard]] bool not_finished() const override;
 
