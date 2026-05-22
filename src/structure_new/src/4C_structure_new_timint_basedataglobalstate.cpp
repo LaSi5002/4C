@@ -306,17 +306,12 @@ void Solid::TimeInt::BaseDataGlobalState::redistribute_and_preserve_state(
       PreservedVectorState{&velnp_, pack_nodal_state(*velnp_)},
       PreservedVectorState{&accnp_, pack_nodal_state(*accnp_)},
   };
+  // Only keep the old-step vectors that are consumed before the next element evaluation
+  // reassembles the current-step force state.
   std::array remapped_vector_states = {
-      RemappedVectorState{&fintn_},
-      RemappedVectorState{&fintnp_},
       RemappedVectorState{&fextn_},
-      RemappedVectorState{&fextnp_},
-      RemappedVectorState{&freactn_},
-      RemappedVectorState{&freactnp_},
       RemappedVectorState{&finertialn_},
-      RemappedVectorState{&finertialnp_},
       RemappedVectorState{&fviscon_},
-      RemappedVectorState{&fvisconp_},
       RemappedVectorState{&fstructold_},
   };
 
@@ -357,6 +352,9 @@ void Solid::TimeInt::BaseDataGlobalState::redistribute_and_preserve_state(
     vector_ptr = std::make_shared<Core::LinAlg::Vector<double>>(*dof_row_map_view(), true);
     Core::LinAlg::export_to(*old_vector, *vector_ptr);
   };
+
+  const auto recreate_vector = [this](std::shared_ptr<Core::LinAlg::Vector<double>>& vector_ptr)
+  { vector_ptr = std::make_shared<Core::LinAlg::Vector<double>>(*dof_row_map_view(), true); };
 
   const auto remap_mstep = [this](TimeStepping::TimIntMStep<Core::LinAlg::Vector<double>>& state)
   {
@@ -406,6 +404,16 @@ void Solid::TimeInt::BaseDataGlobalState::redistribute_and_preserve_state(
   // Force-like and history-adjacent vectors stay on plain DOF-based remapping.
   for (auto& remapped_vector_state : remapped_vector_states)
     remap_vector(*remapped_vector_state.state);
+
+  // Current-step force vectors are rebuilt by the next evaluation/reset path on the redistributed
+  // discretization, so they only need fresh storage on the new map.
+  recreate_vector(fintn_);
+  recreate_vector(fintnp_);
+  recreate_vector(fextnp_);
+  recreate_vector(freactn_);
+  recreate_vector(freactnp_);
+  recreate_vector(finertialnp_);
+  recreate_vector(fvisconp_);
 
   jac_ = nullptr;
   stiff_ = nullptr;
