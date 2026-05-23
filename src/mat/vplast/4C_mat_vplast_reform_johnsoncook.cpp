@@ -338,7 +338,21 @@ void Mat::Viscoplastic::ReformulatedJohnsonCook::setup(const int numgp,
     const Discret::Elements::Fibers& fibers,
     const std::optional<Discret::Elements::CoordinateSystem>& coord_system)
 {
-  time_step_quantities_.current_yield_strength_.resize(numgp, parameter()->init_yield_strength());
+  auto& current_yield_strength = time_step_quantities_.current_yield_strength_;
+  if (restored_time_step_quantities_.has_value())
+  {
+    current_yield_strength.resize(numgp, parameter()->init_yield_strength());
+  }
+  else if (current_yield_strength.empty())
+  {
+    current_yield_strength.resize(numgp, parameter()->init_yield_strength());
+  }
+  else
+  {
+    FOUR_C_ASSERT_ALWAYS(static_cast<int>(current_yield_strength.size()) == numgp,
+        "ReformulatedJohnsonCook history has {} Gauss-point entries, but setup expects {}",
+        current_yield_strength.size(), numgp);
+  }
 }
 
 void Mat::Viscoplastic::ReformulatedJohnsonCook::register_output_data_names(
@@ -383,8 +397,28 @@ void Mat::Viscoplastic::ReformulatedJohnsonCook::unpack_viscoplastic_law(
   // need to unpack the history variables
   if (parameter() != nullptr)
   {
-    extract_from_pack(buffer, time_step_quantities_.current_yield_strength_);
+    restored_time_step_quantities_.emplace();
+    extract_from_pack(buffer, restored_time_step_quantities_->current_yield_strength_);
   }
+}
+
+void Mat::Viscoplastic::ReformulatedJohnsonCook::restore_unpacked_persistent_state_after_setup()
+{
+  if (!restored_time_step_quantities_.has_value()) return;
+
+  auto& restored_current_yield_strength = restored_time_step_quantities_->current_yield_strength_;
+  if (restored_current_yield_strength.empty())
+  {
+    restored_time_step_quantities_.reset();
+    return;
+  }
+  FOUR_C_ASSERT_ALWAYS(restored_current_yield_strength.size() ==
+                           time_step_quantities_.current_yield_strength_.size(),
+      "Restored ReformulatedJohnsonCook history has {} Gauss-point entries, but setup created {}",
+      restored_current_yield_strength.size(), time_step_quantities_.current_yield_strength_.size());
+
+  time_step_quantities_.current_yield_strength_ = std::move(restored_current_yield_strength);
+  restored_time_step_quantities_.reset();
 }
 
 FOUR_C_NAMESPACE_CLOSE

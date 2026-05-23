@@ -146,24 +146,17 @@ bool Solid::TimeInt::Base::perform_dynamic_rebalance()
 
   dataglobalstate_->redistribute_and_preserve_state(parameters);
 
-  dbc_ptr_ = Solid::build_dbc(data_sdyn());
-  dbc_ptr_->init(dataglobalstate_->get_discret(), dataglobalstate_->get_freact_np(),
-      Core::Utils::shared_ptr_from_ref(*this));
-  dbc_ptr_->setup();
-
-  int_ptr_->init(data_s_dyn_ptr(), data_global_state_ptr(), data_io_ptr(), dbc_ptr_,
-      Core::Utils::shared_ptr_from_ref(*this));
-  int_ptr_->setup();
-
-  // Redistribution happens only after a converged step. Restore the redistributed model state
-  // via the existing rollback path before the next predictor touches element/material trial state.
-  int_ptr_->reset_step_state();
-
-  auto& structure_model = dynamic_cast<Solid::ModelEvaluator::Structure&>(
-      int_ptr_->evaluator(Inpar::Solid::model_structure));
-  if (!structure_model.initialize_inertia_and_damping(
-          *dataglobalstate_->get_dis_np(), dataglobalstate_->get_vel_np().get()))
-    FOUR_C_THROW("Failed to rebuild structural inertia and damping after redistribution.");
+  // Redistribution changes the discretization maps, so the full implicit time-integration stack
+  // must be rebuilt, including predictor and nonlinear solver objects that own map-dependent NOX
+  // state.
+  auto& nox_params = datasdyn_->get_nox_params();
+  if (nox_params.isSublist("Solver Options"))
+  {
+    nox_params.sublist("Solver Options").remove("User Defined Pre/Post Operator", false);
+  }
+  issetup_ = false;
+  setup();
+  post_setup();
 
   if (dataglobalstate_->get_discret()->time_ele_evaluations())
     dataglobalstate_->get_discret()->reset_element_eval_timers();

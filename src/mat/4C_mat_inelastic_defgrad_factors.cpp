@@ -2790,6 +2790,7 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::setup(const int numgp,
 
   // call corresponding method of the viscoplastic law
   viscoplastic_law_->setup(numgp, fibers, coord_system);
+  viscoplastic_law_->restore_unpacked_persistent_state_after_setup();
 
   // setup the Local Newton data tracker with the correct number
   // of Gauss points

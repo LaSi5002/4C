@@ -199,9 +199,28 @@ namespace Mat
        */
       virtual void update_gp_state(int gp) = 0;
 
-      virtual void pack_viscoplastic_law(Core::Communication::PackBuffer& data) const = 0;
+      /*!
+       * @brief Pack persistent viscoplastic-law state.
+       *
+       * Stateless laws can rely on the default no-op implementation.
+       */
+      virtual void pack_viscoplastic_law(Core::Communication::PackBuffer& data) const {}
 
-      virtual void unpack_viscoplastic_law(Core::Communication::UnpackBuffer& buffer) = 0;
+      /*!
+       * @brief Extract persistent viscoplastic-law state from a serialized stream.
+       *
+       * Implementations may defer applying the extracted state until after setup() has rebuilt
+       * runtime-only containers. Stateless laws can rely on the default no-op implementation.
+       */
+      virtual void unpack_viscoplastic_law(Core::Communication::UnpackBuffer& buffer) {}
+
+      /*!
+       * @brief Apply any persistent state that was extracted during unpack_viscoplastic_law().
+       *
+       * This is called after setup() so that runtime-only state is initialized before restored
+       * constitutive history is copied into place.
+       */
+      virtual void restore_unpacked_persistent_state_after_setup() {}
 
 
       /*!

@@ -61,7 +61,9 @@ int Adapter::StructureTimeLoop::integrate()
     auto* timint = dynamic_cast<Solid::TimeInt::Base*>(structure_.get());
     if (timint == nullptr) return;
 
-    const std::vector<double> rank_eval_times = structure_->discretization()->get_rank_eval_times();
+    std::vector<double> rank_eval_times =
+        structure_->discretization()->get_rank_eval_times_on_root();
+    Core::Communication::broadcast(rank_eval_times, 0, structure_->discretization()->get_comm());
     if (rank_eval_times.empty()) return;
 
     const auto max_it = std::ranges::max_element(rank_eval_times);

@@ -148,6 +148,8 @@ namespace Mat
 
       void unpack_viscoplastic_law(Core::Communication::UnpackBuffer& buffer) override;
 
+      void restore_unpacked_persistent_state_after_setup() override;
+
       void register_output_data_names(
           std::unordered_map<std::string, int>& names_and_size) const override;
 
@@ -248,6 +250,7 @@ namespace Mat
         std::vector<double> current_yield_strength_;
       };
       TimeStepQuantities time_step_quantities_;
+      std::optional<TimeStepQuantities> restored_time_step_quantities_;
     };
 
   }  // namespace Viscoplastic

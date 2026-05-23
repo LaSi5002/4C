@@ -311,6 +311,10 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::TimeStepQuantities:
   // gradient is evaluated fully after the restart
   current_defgrad.resize(last_substep_plastic_defgrad_inverse.size(),
       Core::LinAlg::Matrix<3, 3>{Core::LinAlg::Initialization::zero});
+
+  // The unpacked history already carries the correct Gauss-point sizing. Mark it as initialized so
+  // a later setup() call does not overwrite all restored Gauss-point states from entry 0.
+  resize_called = true;
 }
 
 /*--------------------------------------------------------------------*
@@ -379,6 +383,10 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager:
 {
   // extract last values
   extract_from_pack(buffer, curr_num_iters_);
+
+  // The unpacked iteration counters are already sized consistently with the restored element
+  // state. Prevent a later resize() from collapsing them onto the first entry.
+  resize_called_ = true;
 }
 
 
