@@ -23,6 +23,7 @@
 #include "4C_material_parameter_base.hpp"
 #include "4C_utils_enum.hpp"
 #include "4C_utils_exceptions.hpp"
+#include "4C_utils_linesearch.hpp"
 
 #include <boost/graph/visitors.hpp>
 #include <Teuchos_ParameterList.hpp>
@@ -42,6 +43,17 @@ namespace Discret::Utils
 
 namespace Mat
 {
+  namespace InelasticDefgradTransvIsotropElastViscoplastUtils
+  {
+    //! Builds this material's RecoveryPolicy from the parsed LINE_SEARCH.RECOVERY_POLICY input
+    //! block: abort and treat_as_too_high map onto the stateless AlwaysAbort/AlwaysTreatAsTooHigh
+    //! policies, individual_contraction_factor maps onto IndividualContractionFactor using the
+    //! per-error factors given alongside it. Exposed (rather than file-local to the .cpp) so it
+    //! can be unit tested directly.
+    [[nodiscard]] Core::Utils::LineSearch::RecoveryPolicy<ErrorType> viscoplastic_error_recovery(
+        const LocalNewtonLineSearchRecoveryParams& recovery_params);
+  }  // namespace InelasticDefgradTransvIsotropElastViscoplastUtils
+
   namespace PAR
   {
     enum class InelasticSource;
@@ -1842,6 +1854,25 @@ namespace Mat
      * @return solution of the Local Newton Loop
      */
     Core::LinAlg::Matrix<10, 1> local_newton_loop(
+        const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
+            local_integration_input,
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status);
+
+    Core::LinAlg::Matrix<10, 1> globalized_local_newton_with_line_search(
+        const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
+            local_integration_input,
+        Core::Utils::LineSearch::LineSearch<
+            InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>& line_search,
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status);
+
+    Core::Utils::LineSearch::MeritResult<
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>
+    evaluate_local_newton_merit(const double alpha, const Core::LinAlg::Matrix<10, 1>& current_sol,
+        const Core::LinAlg::Matrix<10, 1>& dx,
+        const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
+            local_integration_input);
+
+    Core::LinAlg::Matrix<10, 1> run_local_newton_solve(
         const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
             local_integration_input,
         InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status);

@@ -15,6 +15,7 @@
 #include "4C_linalg_utils_scalar_interpolation.hpp"
 #include "4C_mat_multiplicative_split_defgrad_elasthyper_service.hpp"
 #include "4C_utils_exceptions.hpp"
+#include "4C_utils_linesearch_params.hpp"
 
 #include <cstdint>
 #include <format>
@@ -852,6 +853,72 @@ namespace Mat
       double increment_norm;
     };
 
+    //! how the line search recovers from a merit-evaluation error. abort and treat_as_too_high
+    //! apply uniformly to every error; individual_contraction_factor instead contracts the step
+    //! by a per-error factor, given in LocalNewtonLineSearchIndividualContractionFactorParams
+    enum class RecoveryStrategy
+    {
+      abort,
+      treat_as_too_high,
+      individual_contraction_factor
+    };
+
+    struct LocalNewtonLineSearchIndividualContractionFactorParams
+    {
+      double overflow_error;
+      double negative_plastic_strain;
+      double failed_matrix_log_evaluation;
+      double failed_matrix_exp_evaluation;
+    };
+
+    //! recovery strategy used while evaluating the merit function during line search
+    struct LocalNewtonLineSearchRecoveryParams
+    {
+      RecoveryStrategy strategy;
+
+      LocalNewtonLineSearchIndividualContractionFactorParams individual_contraction_factor;
+    };
+
+    //! settings for globalization of the Local Newton loop by line search
+    struct LocalNewtonLineSearchParams
+    {
+      //! chosen line-search algorithm
+      Core::Utils::LineSearch::LineSearchType type;
+
+      //! initial trial stepsize
+      double alpha_init;
+
+      //! maximum number of line-search iterations
+      int max_iter;
+
+      //! stepsize reduction factor used by fixed-factor backtracking
+      double reduction_factor;
+
+      //! Armijo-specific settings
+      Core::Utils::LineSearch::ArmijoParams armijo;
+
+      //! Goldstein-specific settings
+      Core::Utils::LineSearch::GoldsteinParams goldstein;
+
+      //! Wolfe-specific settings
+      Core::Utils::LineSearch::WolfeParams wolfe;
+
+      //! Dai-Kou-specific settings
+      Core::Utils::LineSearch::DaiKouParams dai_kou;
+
+      //! Grippo-Lampariello-Lucidi-specific settings
+      Core::Utils::LineSearch::GrippoLamparielloLucidiParams grippo_lampariello_lucidi;
+
+      //! Zhang-Hager nonmonotone Armijo-specific settings
+      Core::Utils::LineSearch::ZhangHagerNonmonotoneParams zhang_hager_nonmonotone;
+
+      //! Hager-Zhang-specific settings
+      Core::Utils::LineSearch::HagerZhangParams hager_zhang;
+
+      //! per-error recovery strategy used during merit-function evaluation
+      LocalNewtonLineSearchRecoveryParams recovery_policy;
+    };
+
 
 
     //! struct containing parameter specifications for the Local Newton loop
@@ -881,6 +948,9 @@ namespace Mat
       //! employing the divergence management strategy for continuation with
       //! safeguard)
       double max_exceedance_fact_incr_tol;
+
+      //! line-search settings for globalization of the Local Newton loop
+      LocalNewtonLineSearchParams line_search{};
     };
 
     //! class for managing the Local Newton loop, containing the utilized parameters and iteration

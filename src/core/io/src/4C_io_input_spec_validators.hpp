@@ -328,6 +328,32 @@ namespace Core::IO::InputSpecBuilders::Validators
   using Validator = Internal::ValidatorImpl<Internal::GeneralizedTypeT<T>>;
 
   /**
+   * A type-erased validator for aggregate types stored by an input group.
+   */
+  template <typename T>
+  class AggregateValidator
+  {
+   public:
+    template <typename ValidatorT>
+      requires(Internal::ValidatorConcept<ValidatorT, T>)
+    AggregateValidator(ValidatorT validator)
+        : predicate_([validator](const T& value) { return validator(value); }),
+          describe_([validator](std::ostream& os) { validator.describe(os); }),
+          emit_metadata_([validator](YamlNodeRef node) { validator.emit_metadata(node); })
+    {
+    }
+
+    [[nodiscard]] bool operator()(const T& value) const { return predicate_(value); }
+    void describe(std::ostream& os) const { describe_(os); }
+    void emit_metadata(YamlNodeRef node) const { emit_metadata_(node); }
+
+   private:
+    std::function<bool(const T&)> predicate_;
+    std::function<void(std::ostream&)> describe_;
+    std::function<void(YamlNodeRef)> emit_metadata_;
+  };
+
+  /**
    * A tag type to indicate that a validator may be applied to range-like types such as
    * vector or array.
    */
@@ -379,6 +405,13 @@ namespace Core::IO::InputSpecBuilders::Validators
   template <typename T>
     requires(std::is_enum_v<T>)
   [[nodiscard]] Validator<T> in_set(std::initializer_list<T> set);
+
+  /**
+   * Create a validator requiring one data member to be less than another data member.
+   */
+  template <typename Struct, Internal::Numeric Member>
+  [[nodiscard]] AggregateValidator<Struct> a_less_than_b(Member Struct::* lower,
+      Member Struct::* upper, std::string lower_name, std::string upper_name);
 
   /**
    * Helper to mark a range value as inclusive in the in_range() function.
@@ -567,6 +600,33 @@ template <typename T>
   };
 
   return InSetValidator{set};
+}
+
+template <typename Struct, Core::IO::InputSpecBuilders::Validators::Internal::Numeric Member>
+[[nodiscard]] auto Core::IO::InputSpecBuilders::Validators::a_less_than_b(
+    Member Struct::* lower, Member Struct::* upper, std::string lower_name, std::string upper_name)
+    -> AggregateValidator<Struct>
+{
+  struct ALessThanBValidator
+  {
+    bool operator()(const Struct& value) const { return value.*lower < value.*upper; }
+
+    void describe(std::ostream& os) const { os << lower_name << " < " << upper_name; }
+
+    void emit_metadata(YamlNodeRef yaml) const
+    {
+      auto& node = yaml.node;
+      node |= ryml::MAP;
+      emit_value_as_yaml(yaml.wrap(node["less_than"]), std::array{lower_name, upper_name});
+    }
+
+    Member Struct::* lower;
+    Member Struct::* upper;
+    std::string lower_name;
+    std::string upper_name;
+  };
+
+  return ALessThanBValidator{lower, upper, std::move(lower_name), std::move(upper_name)};
 }
 
 template <typename T>

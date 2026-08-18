@@ -43,6 +43,7 @@ from four_c_metadata.metadata import (
     Enum,
     Group,
     List,
+    LessThanValidator,
     Map,
     One_Of,
     PatternValidator,
@@ -516,6 +517,8 @@ def validator_to_header_argument(validator):
 
         case PatternValidator():
             return {"must match pattern": validator.pattern}
+        case LessThanValidator():
+            return {"constraint": f"{validator.lower} < {validator.upper}"}
         case _:
             raise ValueError(f"Unknown validator {validator}")
 

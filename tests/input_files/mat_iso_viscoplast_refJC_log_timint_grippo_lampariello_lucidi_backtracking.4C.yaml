@@ -10,9 +10,7 @@ TITLE:
   - "- time integration of internal variables using logarithmic substepping, as shown in:"
   - "Ana: Continuum Modeling and Calibration of Viscoplasticity in the Context"
   - "of the Lithium Anode in Solid-State Batteries"
-  - "(Master's Thesis, Institute for Computational Mechanics, TU Munich, 2024)."
-  - "The Adaptive Estimate Interpolation algorithm presented in Ana, Schmidt, Wall: Accelerating Local
-    Newton--Raphson Schemes in Computational Plasticity / Viscoplasticity is not used in this test."
+  - "(Master's Thesis, Institute for Computational Mechanics, TU Munich, 2024)"
 PROBLEM TYPE:
   PROBLEMTYPE: "Structure"
 IO:
@@ -63,13 +61,19 @@ MATERIALS:
         MAX_EXCEEDANCE_FACT_RES_TOL: 10
         MAX_EXCEEDANCE_FACT_INCR_TOL: 10
         DIVER_CONT: stop
+        LINE_SEARCH:
+          TYPE: grippo_lampariello_lucidi_backtracking
+          ALPHA_INIT: 1.0
+          MAX_ITER: 20
+          REDUCTION_FACTOR: 0.5
+          GRIPPO_LAMPARIELLO_LUCIDI:
+            RHO: 1e-4
+            MAX_HISTORY: 10
       ERROR_REGISTRATION_SETTINGS:
         REGISTER_PLASTIC_STRAIN_INCR_OVERFLOW: true
         MAX_PLASTIC_STRAIN_INCR: 10686474581524.463
         REGISTER_PLASTIC_STRAIN_DERIV_INCR_OVERFLOW: false
         MAX_PLASTIC_STRAIN_DERIV_INCR: 10686474581524.463
-      ADAPTIVE_ESTIMATE_INTERPOLATION:
-        USE_ADAPTIVE_ESTIMATE_INTERPOLATION: false
   - MAT: 4
     MAT_ViscoplasticLawReformulatedJohnsonCook:
       STRAIN_RATE_PREFAC: 1
@@ -248,3 +252,4 @@ NODE COORDS:
   - "NODE 8 COORD 5.0000000000000000e-01 5.0000000000000000e-01 5.0000000000000000e-01"
 STRUCTURE ELEMENTS:
   - "1 SOLID HEX8 1 2 3 4 5 6 7 8 MAT 1 KINEM nonlinear FIBER1 0 0 1.0"
+

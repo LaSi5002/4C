@@ -1606,6 +1606,38 @@ parameters:
         "in_range(0,10]");
   }
 
+  TEST(InputSpecTest, GroupValidation)
+  {
+    using namespace Core::IO::InputSpecBuilders::Validators;
+    struct Interval
+    {
+      int lower;
+      int upper;
+    };
+
+    auto spec = group<Interval>("interval",
+        {
+            parameter<int>("lower", {.store = in_struct(&Interval::lower)}),
+            parameter<int>("upper", {.store = in_struct(&Interval::upper)}),
+        },
+        {.validator = a_less_than_b(&Interval::lower, &Interval::upper, "lower", "upper")});
+
+    const auto valid = Helpers::match(spec, R"(
+interval:
+  lower: 1
+  upper: 2
+)");
+    EXPECT_EQ(valid.get<Interval>("interval").lower, 1);
+    EXPECT_EQ(valid.get<Interval>("interval").upper, 2);
+
+    EXPECT_THROW(Helpers::match(spec, R"(
+interval:
+  lower: 2
+  upper: 1
+)"),
+        Core::Exception);
+  }
+
   TEST(InputSpecTest, OptionalParameterValidation)
   {
     using namespace Core::IO::InputSpecBuilders::Validators;
