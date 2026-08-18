@@ -11,6 +11,13 @@ TITLE:
   - "Ana: Continuum Modeling and Calibration of Viscoplasticity in the Context"
   - "of the Lithium Anode in Solid-State Batteries"
   - "(Master's Thesis, Institute for Computational Mechanics, TU Munich, 2024)"
+  - "This is a copy of mat_iso_viscoplast_refJC_log_timint_armijo_backtracking.4C.yaml"
+  - "that additionally exercises the LINE_SEARCH RECOVERY_POLICY input block, using"
+  - "STRATEGY: individual_contraction_factor with distinct per-error factors. This"
+  - "load path never triggers any of the four recoverable merit-evaluation errors, so"
+  - "the results are expected to be identical to the RECOVERY_POLICY-less baseline;"
+  - "the point of this test is to exercise parsing, validation, and construction of"
+  - "the per-error recovery policy end to end, not to exercise recovery itself."
 PROBLEM TYPE:
   PROBLEMTYPE: "Structure"
 IO:
@@ -61,6 +68,20 @@ MATERIALS:
         MAX_EXCEEDANCE_FACT_RES_TOL: 10
         MAX_EXCEEDANCE_FACT_INCR_TOL: 10
         DIVER_CONT: stop
+        LINE_SEARCH:
+          TYPE: armijo_backtracking
+          ALPHA_INIT: 1.0
+          MAX_ITER: 20
+          REDUCTION_FACTOR: 0.5
+          ARMIJO:
+            C1: 1e-4
+          RECOVERY_POLICY:
+            STRATEGY: individual_contraction_factor
+            INDIVIDUAL_CONTRACTION_FACTOR:
+              OVERFLOW_ERROR: 0.1
+              NEGATIVE_PLASTIC_STRAIN: 0.2
+              FAILED_MATRIX_LOG_EVALUATION: 0.3
+              FAILED_MATRIX_EXP_EVALUATION: 0.4
       ERROR_REGISTRATION_SETTINGS:
         REGISTER_PLASTIC_STRAIN_INCR_OVERFLOW: true
         MAX_PLASTIC_STRAIN_INCR: 10686474581524.463

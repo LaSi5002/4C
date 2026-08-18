@@ -760,9 +760,18 @@ bool Core::IO::Internal::GroupSpec::match(ConstYamlNodeRef node,
     // Match will stay a partial match.
     return false;
   }
+  if (validate_my_storage)
+  {
+    const auto [valid, message] = validate_my_storage(struct_storage);
+    if (!valid)
+    {
+      match_entry.additional_info = message;
+      return false;
+    }
+  }
+  const auto [stored, message] = move_my_storage(container, std::move(struct_storage));
+  FOUR_C_ASSERT(stored, "Internal error: could not move storage: {}.", message);
   match_entry.state = IO::Internal::MatchEntry::State::matched;
-  [[maybe_unused]] auto [ok, msg] = move_my_storage(container, std::move(struct_storage));
-  FOUR_C_ASSERT(ok, "Internal error: could not move storage: {}.", msg);
   return true;
 }
 
@@ -775,6 +784,11 @@ void Core::IO::Internal::GroupSpec::set_default_value(InputSpecBuilders::Storage
     InputSpecBuilders::Storage subcontainer;
     init_my_storage(subcontainer);
     spec.impl().set_default_value(subcontainer);
+    if (validate_my_storage)
+    {
+      const auto [valid, message] = validate_my_storage(subcontainer);
+      FOUR_C_ASSERT(valid, "Internal error: invalid default group: {}.", message);
+    }
     [[maybe_unused]] auto [ok, msg] = move_my_storage(container, std::move(subcontainer));
     FOUR_C_ASSERT(ok, "Internal error: could not move storage: {}.", msg);
   }
@@ -793,6 +807,10 @@ void Core::IO::Internal::GroupSpec::emit_metadata(
     node.node["description"] << data.description;
   }
   emit_value_as_yaml(node.wrap(node.node["required"]), data.required);
+  if (emit_validator_metadata)
+  {
+    emit_validator_metadata(node.wrap(node.node["validator"]));
+  }
   node.node["specs"] |= ryml::SEQ;
   {
     auto child = node.node["specs"].append_child();

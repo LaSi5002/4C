@@ -61,6 +61,14 @@ MATERIALS:
         MAX_EXCEEDANCE_FACT_RES_TOL: 10
         MAX_EXCEEDANCE_FACT_INCR_TOL: 10
         DIVER_CONT: stop
+        LINE_SEARCH:
+          TYPE: zhang_hager_nonmonotone_armijo_backtracking
+          ALPHA_INIT: 1.0
+          MAX_ITER: 20
+          REDUCTION_FACTOR: 0.5
+          ZHANG_HAGER_NONMONOTONE:
+            RHO: 1e-4
+            ETA: 0.85
       ERROR_REGISTRATION_SETTINGS:
         REGISTER_PLASTIC_STRAIN_INCR_OVERFLOW: true
         MAX_PLASTIC_STRAIN_INCR: 10686474581524.463

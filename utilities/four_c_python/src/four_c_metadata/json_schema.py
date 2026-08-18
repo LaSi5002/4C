@@ -25,6 +25,7 @@ from four_c_metadata.metadata import (
     Primitive,
     RangeValidator,
     PatternValidator,
+    LessThanValidator,
     AllEmementsValidator,
     Selection,
     Tuple,
@@ -267,7 +268,7 @@ def create_schema_from_selection(selection: Selection) -> Schema:
 
 
 def validator_to_schema(
-    validator: RangeValidator | PatternValidator,
+    validator: RangeValidator | PatternValidator | LessThanValidator,
 ) -> Sequence[
     Validators.exclusiveMinimum
     | Validators.exclusiveMaximum
@@ -293,6 +294,10 @@ def validator_to_schema(
 
         case PatternValidator():
             return [Validators.pattern(validator.pattern.pattern)]
+
+        case LessThanValidator():
+            # JSON Schema cannot compare the values of two sibling properties.
+            return None
 
         case _:
             if validator is not None:

@@ -61,6 +61,15 @@ MATERIALS:
         MAX_EXCEEDANCE_FACT_RES_TOL: 10
         MAX_EXCEEDANCE_FACT_INCR_TOL: 10
         DIVER_CONT: stop
+        LINE_SEARCH:
+          TYPE: dai_kou_simple_bisection
+          ALPHA_INIT: 1.0
+          MAX_ITER: 20
+          DAI_KOU:
+            EPSILON: 1e-6
+            RHO: 1e-4
+            SIGMA: 0.9
+            ETA_RELATIVE: 1.0
       ERROR_REGISTRATION_SETTINGS:
         REGISTER_PLASTIC_STRAIN_INCR_OVERFLOW: true
         MAX_PLASTIC_STRAIN_INCR: 10686474581524.463

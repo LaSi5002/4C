@@ -2875,6 +2875,7 @@ std::unordered_map<Core::Materials::MaterialType, Core::IO::InputSpec> Global::v
   {
     using namespace Core::IO::InputSpecBuilders::Validators;
     namespace ViscoplastUtils = Mat::InelasticDefgradTransvIsotropElastViscoplastUtils;
+    namespace LocalNewtonLineSearch = Core::Utils::LineSearch;
 
     known_materials[Core::Materials::mfi_transv_isotrop_elast_viscoplast] = group(
         "MAT_InelasticDefgradTransvIsotropElastViscoplast",
@@ -3001,7 +3002,294 @@ std::unordered_map<Core::Materials::MaterialType, Core::IO::InputSpec> Global::v
                             .default_value = ViscoplastUtils::LocalNewtonDiverCont::stop,
                             .store = in_struct(&ViscoplastUtils::LocalNewtonParams::diver_cont)
 
-                        })
+                        }),
+                    group<ViscoplastUtils::LocalNewtonLineSearchParams>("LINE_SEARCH",
+                        {
+                            parameter<LocalNewtonLineSearch::LineSearchType>("TYPE",
+                                {.description = "line-search algorithm used to globalize the "
+                                                "Local Newton loop",
+                                    .default_value = LocalNewtonLineSearch::LineSearchType::none,
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::type)}),
+                            parameter<double>("ALPHA_INIT",
+                                {.description = "initial trial stepsize for line search",
+                                    .default_value = 1.0,
+                                    .validator = positive<double>(),
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::alpha_init)}),
+                            parameter<int>("MAX_ITER",
+                                {.description = "maximum number of line-search iterations",
+                                    .default_value = 20,
+                                    .validator = positive<int>(),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::max_iter)}),
+                            parameter<double>("REDUCTION_FACTOR",
+                                {.description = "stepsize reduction factor used by fixed-factor "
+                                                "backtracking",
+                                    .default_value = 0.5,
+                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::reduction_factor)}),
+                            group<LocalNewtonLineSearch::ArmijoParams>("ARMIJO",
+                                {
+                                    parameter<double>("C1",
+                                        {.description = "Armijo sufficient decrease parameter",
+                                            .default_value = 1.0e-4,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::ArmijoParams::c1)}),
+                                },
+                                {.description = "Armijo-specific settings for the Local Newton "
+                                                "line search",
+                                    .required = false,
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::armijo)}),
+                            group<LocalNewtonLineSearch::GoldsteinParams>("GOLDSTEIN",
+                                {parameter<double>("RHO",
+                                    {.description = "Goldstein sufficient-decrease parameter",
+                                        .default_value = 1.0e-4,
+                                        .validator = in_range(excl(0.0), excl(0.5)),
+                                        .store = in_struct(
+                                            &LocalNewtonLineSearch::GoldsteinParams::rho)})},
+                                {.description = "Goldstein-specific settings for the Local Newton "
+                                                "line search",
+                                    .required = false,
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::goldstein)}),
+                            group<LocalNewtonLineSearch::WolfeParams>("WOLFE",
+                                {
+                                    parameter<double>(
+                                        "C1", {.description = "Wolfe sufficient decrease parameter",
+                                                  .default_value = 1.0e-4,
+                                                  .validator = in_range(excl(0.0), excl(1.0)),
+                                                  .store = in_struct(
+                                                      &LocalNewtonLineSearch::WolfeParams::c1)}),
+                                    parameter<double>(
+                                        "C2", {.description = "Wolfe curvature parameter",
+                                                  .default_value = 0.9,
+                                                  .validator = in_range(excl(0.0), excl(1.0)),
+                                                  .store = in_struct(
+                                                      &LocalNewtonLineSearch::WolfeParams::c2)}),
+                                },
+                                {.description = "Wolfe-specific settings for the Local Newton "
+                                                "line search",
+                                    .required = false,
+                                    .validator =
+                                        a_less_than_b(&LocalNewtonLineSearch::WolfeParams::c1,
+                                            &LocalNewtonLineSearch::WolfeParams::c2, "C1", "C2"),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::wolfe)}),
+                            group<LocalNewtonLineSearch::DaiKouParams>("DAI_KOU",
+                                {
+                                    parameter<double>("EPSILON",
+                                        {.description = "Dai-Kou function-value tolerance",
+                                            .default_value = 1.0e-6,
+                                            .validator = positive<double>(),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::DaiKouParams::epsilon)}),
+                                    parameter<double>("RHO",
+                                        {.description = "Dai-Kou sufficient-decrease parameter",
+                                            .default_value = 1.0e-4,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::DaiKouParams::rho)}),
+                                    parameter<double>("SIGMA",
+                                        {.description = "Dai-Kou curvature parameter",
+                                            .default_value = 0.9,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::DaiKouParams::sigma)}),
+                                    parameter<double>("ETA_RELATIVE",
+                                        {.description = "scale of the inverse-square Dai-Kou "
+                                                        "sequence relative to the initial "
+                                                        "directional derivative",
+                                            .default_value = 1.0,
+                                            .validator = positive<double>(),
+                                            .store = in_struct(&LocalNewtonLineSearch::
+                                                    DaiKouParams::eta_relative)}),
+                                },
+                                {.description = "Dai-Kou-specific settings for the Local Newton "
+                                                "line search",
+                                    .required = false,
+                                    .validator =
+                                        a_less_than_b(&LocalNewtonLineSearch::DaiKouParams::rho,
+                                            &LocalNewtonLineSearch::DaiKouParams::sigma, "RHO",
+                                            "SIGMA"),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::dai_kou)}),
+                            group<LocalNewtonLineSearch::GrippoLamparielloLucidiParams>(
+                                "GRIPPO_LAMPARIELLO_LUCIDI",
+                                {
+                                    parameter<double>(
+                                        "RHO", {.description = "Grippo-Lampariello-Lucidi "
+                                                               "sufficient-decrease parameter",
+                                                   .default_value = 1.0e-4,
+                                                   .validator = in_range(excl(0.0), excl(1.0)),
+                                                   .store = in_struct(&LocalNewtonLineSearch::
+                                                           GrippoLamparielloLucidiParams::rho)}),
+                                    parameter<int>("MAX_HISTORY",
+                                        {.description = "maximum number of previous merit values "
+                                                        "used by the nonmonotone condition",
+                                            .default_value = 10,
+                                            .validator = positive_or_zero<int>(),
+                                            .store = in_struct(&LocalNewtonLineSearch::
+                                                    GrippoLamparielloLucidiParams::max_history)}),
+                                },
+                                {.description = "Grippo-Lampariello-Lucidi-specific settings "
+                                                "for the Local Newton line search",
+                                    .required = false,
+                                    .store =
+                                        in_struct(&ViscoplastUtils::LocalNewtonLineSearchParams::
+                                                grippo_lampariello_lucidi)}),
+                            group<LocalNewtonLineSearch::ZhangHagerNonmonotoneParams>(
+                                "ZHANG_HAGER_NONMONOTONE",
+                                {
+                                    parameter<double>(
+                                        "RHO", {.description = "Zhang-Hager nonmonotone Armijo "
+                                                               "sufficient-decrease parameter",
+                                                   .default_value = 1.0e-4,
+                                                   .validator = in_range(excl(0.0), excl(1.0)),
+                                                   .store = in_struct(&LocalNewtonLineSearch::
+                                                           ZhangHagerNonmonotoneParams::rho)}),
+                                    parameter<double>(
+                                        "ETA", {.description = "Zhang-Hager averaging parameter",
+                                                   .default_value = 0.85,
+                                                   .validator = in_range(0.0, 1.0),
+                                                   .store = in_struct(&LocalNewtonLineSearch::
+                                                           ZhangHagerNonmonotoneParams::eta)}),
+                                },
+                                {.description = "Zhang-Hager nonmonotone Armijo settings for "
+                                                "the Local Newton line search",
+                                    .required = false,
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::zhang_hager_nonmonotone)}),
+                            group<LocalNewtonLineSearch::HagerZhangParams>("HAGER_ZHANG",
+                                {
+                                    parameter<double>("DELTA",
+                                        {.description = "Hager-Zhang delta parameter",
+                                            .default_value = 0.1,
+                                            .validator = in_range(excl(0.0), excl(0.5)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::HagerZhangParams::delta)}),
+                                    parameter<double>("SIGMA",
+                                        {.description = "Hager-Zhang sigma parameter",
+                                            .default_value = 0.9,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::HagerZhangParams::sigma)}),
+                                    parameter<double>(
+                                        "EPSILON", {.description = "Hager-Zhang epsilon parameter",
+                                                       .default_value = 1.0e-6,
+                                                       .validator = positive<double>(),
+                                                       .store = in_struct(&LocalNewtonLineSearch::
+                                                               HagerZhangParams::epsilon)}),
+                                    parameter<double>("THETA",
+                                        {.description = "Hager-Zhang theta parameter",
+                                            .default_value = 0.5,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::HagerZhangParams::theta)}),
+                                    parameter<double>("GAMMA",
+                                        {.description = "Hager-Zhang gamma parameter",
+                                            .default_value = 0.66,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::HagerZhangParams::gamma)}),
+                                    parameter<double>("RHO",
+                                        {.description = "Hager-Zhang bracket expansion parameter",
+                                            .default_value = 5.0,
+                                            .validator = in_range(
+                                                excl(1.0), std::numeric_limits<double>::max()),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::HagerZhangParams::rho)}),
+                                },
+                                {.description = "Hager-Zhang-specific settings for the Local "
+                                                "Newton line search",
+                                    .required = false,
+                                    .validator = a_less_than_b(
+                                        &LocalNewtonLineSearch::HagerZhangParams::delta,
+                                        &LocalNewtonLineSearch::HagerZhangParams::sigma, "DELTA",
+                                        "SIGMA"),
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::hager_zhang)}),
+                            group<ViscoplastUtils::LocalNewtonLineSearchRecoveryParams>(
+                                "RECOVERY_POLICY",
+                                {
+                                    parameter<ViscoplastUtils::RecoveryStrategy>("STRATEGY",
+                                        {.description =
+                                                "how the line search recovers from a "
+                                                "merit-evaluation error. abort and "
+                                                "treat_as_too_high apply uniformly to every "
+                                                "error; individual_contraction_factor instead "
+                                                "uses the per-error factors given in "
+                                                "INDIVIDUAL_CONTRACTION_FACTOR",
+                                            .default_value =
+                                                ViscoplastUtils::RecoveryStrategy::abort,
+                                            .store = in_struct(&ViscoplastUtils::
+                                                    LocalNewtonLineSearchRecoveryParams::
+                                                        strategy)}),
+                                    group<ViscoplastUtils::
+                                            LocalNewtonLineSearchIndividualContractionFactorParams>(
+                                        "INDIVIDUAL_CONTRACTION_FACTOR",
+                                        {
+                                            parameter<double>("OVERFLOW_ERROR",
+                                                {.description =
+                                                        "contraction factor for an overflow in "
+                                                        "the plastic strain increment "
+                                                        "evaluation",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                overflow_error)}),
+                                            parameter<double>("NEGATIVE_PLASTIC_STRAIN",
+                                                {.description = "contraction factor for a negative "
+                                                                "plastic strain encountered at the "
+                                                                "trial step",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                negative_plastic_strain)}),
+                                            parameter<double>("FAILED_MATRIX_LOG_EVALUATION",
+                                                {.description =
+                                                        "contraction factor for a failed matrix "
+                                                        "logarithm evaluation (logarithmic time "
+                                                        "integration)",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                failed_matrix_log_evaluation)}),
+                                            parameter<double>("FAILED_MATRIX_EXP_EVALUATION",
+                                                {.description =
+                                                        "contraction factor for a failed matrix "
+                                                        "exponential evaluation (standard time "
+                                                        "integration)",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                failed_matrix_exp_evaluation)}),
+                                        },
+                                        {.description =
+                                                "per-error contraction factors, only used when "
+                                                "STRATEGY is individual_contraction_factor",
+                                            .required = false,
+                                            .store = in_struct(&ViscoplastUtils::
+                                                    LocalNewtonLineSearchRecoveryParams::
+                                                        individual_contraction_factor)}),
+                                },
+                                {.description = "recovery strategy used while evaluating the "
+                                                "merit function during line search",
+                                    .required = false,
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::recovery_policy)}),
+                        },
+                        {.description = "Settings for line-search globalization of the Local "
+                                        "Newton loop",
+                            .required = false,
+                            .store = in_struct(&ViscoplastUtils::LocalNewtonParams::line_search)})
 
                 },
                 {.description = "Parameters used in the Local Newton--Raphson procedure "

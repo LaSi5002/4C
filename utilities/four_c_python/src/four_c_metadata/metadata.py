@@ -12,7 +12,7 @@ from __future__ import annotations
 import abc
 import re
 from collections.abc import Generator, Sequence
-from typing import Callable, Literal, Protocol, TypeAlias, TypeVar
+from typing import Any, Callable, Literal, Protocol, TypeAlias, TypeVar
 
 from four_c_metadata.not_set import NotSet, check_if_set, NotSetAlias
 
@@ -1047,6 +1047,25 @@ class PatternValidator(Validator):
         return cls(**data_dict)
 
 
+class LessThanValidator(Validator[dict[str, Any]]):
+    def __init__(self, members: Sequence[str]):
+        """Validator requiring one group member to be less than another."""
+        if len(members) != 2:
+            raise ValueError(
+                f"A less-than validator requires exactly two members, got {members}."
+            )
+        self.lower, self.upper = members
+
+    def _validate(self, entry: dict[str, Any]) -> bool:
+        """Validate the relation between the two group members."""
+        return entry[self.lower] < entry[self.upper]
+
+    @classmethod
+    def from_4C_metadata(cls, members: Sequence[str]) -> LessThanValidator:
+        """Create a less-than validator from 4C metadata."""
+        return cls(members)
+
+
 def validator_from_dict(data_dict: dict) -> Validator:
     """Create validator from dict.
 
@@ -1067,5 +1086,7 @@ def validator_from_dict(data_dict: dict) -> Validator:
             return AllEmementsValidator.from_4C_metadata_dict(validator_data)
         case "pattern":
             return PatternValidator.from_4C_metadata_dict(validator_data)
+        case "less_than":
+            return LessThanValidator.from_4C_metadata(validator_data)
         case _:
             raise KeyError(f"Unknown validator {data_dict}")

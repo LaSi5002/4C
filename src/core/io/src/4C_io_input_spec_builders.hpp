@@ -888,6 +888,11 @@ namespace Core::IO
       bool required{true};
 
       /**
+       * An optional validator that is called after all values in the group have been parsed.
+       */
+      std::optional<Validators::AggregateValidator<T>> validator{std::nullopt};
+
+      /**
        * An optional function to store a parsed value. See the in_struct() function for more
        * details.
        */
@@ -1089,6 +1094,9 @@ namespace Core::IO
       InputSpec spec;
 
       std::function<void(InputSpecBuilders::Storage& my_storage)> init_my_storage{};
+      std::function<InputSpecBuilders::StoreStatus(const InputSpecBuilders::Storage&)>
+          validate_my_storage{};
+      std::function<void(YamlNodeRef)> emit_validator_metadata{};
       InputSpecBuilders::StoreFunction<InputSpecBuilders::Storage> move_my_storage{};
 
       void parse(ValueParser& parser, InputParameterContainer& container) const;
@@ -2897,6 +2905,25 @@ Core::IO::InputSpec Core::IO::InputSpecBuilders::group(std::string name,
         data.store ? data.store : in_container<StorageType>(name));
   }
 
+  std::function<StoreStatus(const Storage&)> validate_my_storage;
+  std::function<void(YamlNodeRef)> emit_validator_metadata;
+  if (data.validator)
+  {
+    validate_my_storage = [validator = *data.validator, name](const Storage& storage)
+    {
+      FOUR_C_ASSERT(Internal::holds<StorageType>(storage),
+          "Internal error: group storage must contain {}.", typeid(StorageType).name());
+      if (validator(std::any_cast<const StorageType&>(storage))) return StoreStatus::ok();
+
+      std::ostringstream description;
+      validator.describe(description);
+      return StoreStatus::fail(std::format(
+          "Candidate group '{}' does not pass validation: {}", name, description.str()));
+    };
+    emit_validator_metadata = [validator = *data.validator](YamlNodeRef node)
+    { validator.emit_metadata(node); };
+  }
+
   Internal::InputSpecImpl::CommonData common_data{
       .name = name,
       .description = data.description,
@@ -2917,6 +2944,8 @@ Core::IO::InputSpec Core::IO::InputSpecBuilders::group(std::string name,
               },
           .spec = std::move(internal_all_of),
           .init_my_storage = [](Storage& storage) { storage.emplace<StorageType>(); },
+          .validate_my_storage = std::move(validate_my_storage),
+          .emit_validator_metadata = std::move(emit_validator_metadata),
           .move_my_storage = move_my_storage,
       },
       common_data);

@@ -61,6 +61,13 @@ MATERIALS:
         MAX_EXCEEDANCE_FACT_RES_TOL: 10
         MAX_EXCEEDANCE_FACT_INCR_TOL: 10
         DIVER_CONT: stop
+        LINE_SEARCH:
+          TYPE: strong_wolfe_more_thuente
+          ALPHA_INIT: 1.0
+          MAX_ITER: 20
+          WOLFE:
+            C1: 1e-4
+            C2: 0.9
       ERROR_REGISTRATION_SETTINGS:
         REGISTER_PLASTIC_STRAIN_INCR_OVERFLOW: true
         MAX_PLASTIC_STRAIN_INCR: 10686474581524.463

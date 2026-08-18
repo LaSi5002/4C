@@ -3626,7 +3626,7 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::viscoplastic_correction(
 
       // perform substep local Newton loop
       err_status = ViscoplastUtils::ErrorType::no_errors;
-      sol = local_newton_loop(curr_deftensors, curr_temp,
+      sol = run_local_newton_solve(curr_deftensors, curr_temp,
           time_step_quantities_.last_substep_plastic_strain[gp_],
           local_substepping_utils_.get_substep_size(), err_status);
       // update Local Newton quantities
@@ -3665,9 +3665,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::viscoplastic_correction(
   else
   {
     // perform local Newton loop
-
-    sol = local_newton_loop(deftensors, temperature, time_step_quantities_.last_plastic_strain[gp_],
-        time_step_tracker_.dt, err_status);
+    sol = run_local_newton_solve(deftensors, temperature,
+        time_step_quantities_.last_plastic_strain[gp_], time_step_tracker_.dt, err_status);
     if (err_status != ViscoplastUtils::ErrorType::no_errors)
     {
       FOUR_C_THROW("{}", get_error_warning_info(std::format(
