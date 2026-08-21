@@ -1870,7 +1870,8 @@ namespace Mat
     evaluate_local_newton_merit(const double alpha, const Core::LinAlg::Matrix<10, 1>& current_sol,
         const Core::LinAlg::Matrix<10, 1>& dx,
         const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
-            local_integration_input);
+            local_integration_input,
+        Core::LinAlg::Matrix<10, 1>* residual_out = nullptr);
 
     Core::LinAlg::Matrix<10, 1> run_local_newton_solve(
         const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&

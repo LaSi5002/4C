@@ -6,12 +6,14 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 #include "4C_mat_inelastic_defgrad_factors.hpp"
+#include "4C_mat_inelastic_defgrad_factors_merit_export.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <format>
 #include <limits>
 #include <memory>
+#include <optional>
 
 FOUR_C_NAMESPACE_OPEN
 
@@ -19,6 +21,7 @@ namespace
 {
   namespace ViscoplastUtils = Mat::InelasticDefgradTransvIsotropElastViscoplastUtils;
   namespace LocalNewtonLineSearch = Core::Utils::LineSearch;
+  using MeritExportDebug::MeritCurveExporter;
 
   [[nodiscard]] double merit_from_residual(const Core::LinAlg::Matrix<10, 1>& residual)
   {
@@ -72,7 +75,8 @@ Core::Utils::LineSearch::MeritResult<
 Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_merit(const double alpha,
     const Core::LinAlg::Matrix<10, 1>& current_sol, const Core::LinAlg::Matrix<10, 1>& dx,
     const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
-        local_integration_input)
+        local_integration_input,
+    Core::LinAlg::Matrix<10, 1>* residual_out)
 {
   Core::LinAlg::Matrix<10, 1> trial_sol(current_sol);
   trial_sol.update(alpha, dx, 1.0);
@@ -82,6 +86,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_merit(c
       evaluate_local_newton_residual(local_integration_input, trial_sol, error);
 
   if (error != ViscoplastUtils::ErrorType::no_errors) return {.value = 0.0, .error = error};
+
+  if (residual_out != nullptr) *residual_out = trial_residual;
 
   return {.value = merit_from_residual(trial_residual), .error = std::nullopt};
 }
@@ -98,6 +104,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
 {
   ensure_error_free_evaluation(err_status);
 
+  const int merit_curve_trajectory_id = MeritCurveExporter::instance().next_trajectory_id();
+
   auto zero_result = []()
   { return Core::LinAlg::Matrix<10, 1>{Core::LinAlg::Initialization::zero}; };
 
@@ -105,6 +113,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
   Core::LinAlg::Matrix<10, 1> d(Core::LinAlg::Initialization::zero);
   Core::LinAlg::Matrix<10, 1> residual(Core::LinAlg::Initialization::zero);
   Core::LinAlg::Matrix<10, 1> temp10x1(Core::LinAlg::Initialization::zero);
+
+  std::optional<Core::LinAlg::Matrix<10, 1>> reusable_residual;
 
   ViscoplastUtils::EvaluationAction eval_action{
       ViscoplastUtils::EvaluationAction::continue_current_iteration};
@@ -128,30 +138,38 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
   {
     err_status = ViscoplastUtils::ErrorType::no_errors;
 
-    residual = evaluate_local_newton_residual(
-        local_integration_input, local_newton_manager_.sol(), err_status);
-
-    manage_evaluation(err_status, local_integration_input, eval_action);
-    switch (eval_action)
+    if (reusable_residual.has_value())
     {
-      case ViscoplastUtils::EvaluationAction::continue_current_iteration:
+      residual = *reusable_residual;
+      reusable_residual.reset();
+    }
+    else
+    {
+      residual = evaluate_local_newton_residual(
+          local_integration_input, local_newton_manager_.sol(), err_status);
+
+      manage_evaluation(err_status, local_integration_input, eval_action);
+      switch (eval_action)
       {
-        break;
-      }
-      case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
-      {
-        local_newton_manager_.increment_iter();
-        continue;
-      }
-      case ViscoplastUtils::EvaluationAction::exit_with_error:
-      {
-        return zero_result();
-      }
-      default:
-      {
-        FOUR_C_THROW("{}",
-            get_error_warning_info(std::format("Invalid evaluation action {} for error status {}",
-                EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+        case ViscoplastUtils::EvaluationAction::continue_current_iteration:
+        {
+          break;
+        }
+        case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
+        {
+          local_newton_manager_.increment_iter();
+          continue;
+        }
+        case ViscoplastUtils::EvaluationAction::exit_with_error:
+        {
+          return zero_result();
+        }
+        default:
+        {
+          FOUR_C_THROW("{}",
+              get_error_warning_info(std::format("Invalid evaluation action {} for error status {}",
+                  EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+        }
       }
     }
 
@@ -168,8 +186,38 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
         return zero_result();
       }
 
-      verify_local_newton_exit(err_status);
-      return local_newton_manager_.sol();
+      if (adaptive_estimate_interp_manager_.has_value())
+      {
+        manage_evaluation(err_status, local_integration_input, eval_action);
+        switch (eval_action)
+        {
+          case ViscoplastUtils::EvaluationAction::continue_current_iteration:
+          {
+            break;
+          }
+          case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
+          {
+            local_newton_manager_.increment_iter();
+            continue;
+          }
+          case ViscoplastUtils::EvaluationAction::exit_with_error:
+          {
+            return zero_result();
+          }
+          default:
+          {
+            FOUR_C_THROW("{}",
+                get_error_warning_info(
+                    std::format("Invalid evaluation action {} for error status {}",
+                        EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+          }
+        }
+      }
+      else
+      {
+        verify_local_newton_exit(err_status);
+        return local_newton_manager_.sol();
+      }
     }
 
     if (local_newton_manager_.is_local_newton_stuck())
@@ -261,31 +309,67 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
     const double merit_0 = merit_from_residual(residual);
     const double dmerit_da_0 = -2.0 * merit_0;
 
+    double last_evaluated_alpha = std::numeric_limits<double>::quiet_NaN();
+    Core::LinAlg::Matrix<10, 1> last_evaluated_residual(Core::LinAlg::Initialization::zero);
+
     auto merit =
-        [this, &local_integration_input, &current_sol, &d](
+        [this, &local_integration_input, &current_sol, &d, &last_evaluated_alpha,
+            &last_evaluated_residual](
             const double alpha) -> LocalNewtonLineSearch::MeritResult<ViscoplastUtils::ErrorType>
     {
-      return this->evaluate_local_newton_merit(alpha, current_sol, d, local_integration_input);
+      Core::LinAlg::Matrix<10, 1> trial_residual(Core::LinAlg::Initialization::zero);
+      const auto result = this->evaluate_local_newton_merit(
+          alpha, current_sol, d, local_integration_input, &trial_residual);
+      if (!result.error.has_value())
+      {
+        last_evaluated_alpha = alpha;
+        last_evaluated_residual = trial_residual;
+      }
+      return result;
     };
 
-    const double alpha = line_search(dmerit_da_0, merit_0, std::move(merit));
+    const double alpha = line_search(dmerit_da_0, merit_0, merit);
+
+    MeritCurveExporter::instance().maybe_export(
+        merit, merit_curve_trajectory_id, local_newton_manager_.iter(), alpha);
+
     if (!std::isfinite(alpha) || alpha <= 0.0)
     {
       err_status =
           InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType::no_convergence_local_newton;
-
-      if (parameter()->use_local_substepping())
+      manage_evaluation(err_status, local_integration_input, eval_action);
+      switch (eval_action)
       {
-        return zero_result();
+        case ViscoplastUtils::EvaluationAction::continue_current_iteration:
+        {
+          continue;
+        }
+        case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
+        {
+          local_newton_manager_.increment_iter();
+          continue;
+        }
+        case ViscoplastUtils::EvaluationAction::exit_with_error:
+        {
+          return zero_result();
+        }
+        default:
+        {
+          FOUR_C_THROW("{}",
+              get_error_warning_info(std::format("Invalid evaluation action {} for error status {}",
+                  EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+        }
       }
-
-      verify_local_newton_exit(err_status);
-      return local_newton_manager_.sol();
     }
 
     d.scale(alpha);
     local_newton_manager_.increment_solution_vector(d);
     local_newton_manager_.increment_iter();
+
+    if (last_evaluated_alpha == alpha)
+    {
+      reusable_residual = last_evaluated_residual;
+    }
   }
 }
 

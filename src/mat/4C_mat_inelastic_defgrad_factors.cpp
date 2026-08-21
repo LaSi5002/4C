@@ -28,6 +28,7 @@
 #include "4C_mat_elast_couptransverselyisotropic.hpp"
 #include "4C_mat_elasthyper_service.hpp"
 #include "4C_mat_electrode.hpp"
+#include "4C_mat_inelastic_defgrad_factors_merit_export.hpp"
 #include "4C_mat_inelastic_defgrad_factors_service.hpp"
 #include "4C_mat_multiplicative_split_defgrad_elasthyper.hpp"
 #include "4C_mat_multiplicative_split_defgrad_elasthyper_service.hpp"
@@ -3773,6 +3774,9 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
 {
   ensure_error_free_evaluation(err_status);
 
+  const int merit_curve_trajectory_id =
+      MeritExportDebug::MeritCurveExporter::instance().next_trajectory_id();
+
   // auxiliaries
   Core::LinAlg::Matrix<10, 1> temp10x1(Core::LinAlg::Initialization::zero);
 
@@ -3875,7 +3879,34 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
         return Core::LinAlg::Matrix<10, 1>{
             Core::LinAlg::Initialization::zero};  // exit with the set error status
       }
-      // for one-step processes, we account for the set divergence continuation strategy
+      else if (adaptive_estimate_interp_manager_.has_value())
+      {
+        manage_evaluation(err_status, local_integration_input, eval_action);
+        switch (eval_action)
+        {
+          case (ViscoplastUtils::EvaluationAction::continue_current_iteration):
+          {
+            break;
+          }
+          case (ViscoplastUtils::EvaluationAction::continue_with_next_iteration):
+          {
+            local_newton_manager_.increment_iter();
+            continue;
+          }
+          case (ViscoplastUtils::EvaluationAction::exit_with_error):
+          {
+            return Core::LinAlg::Matrix<10, 1>{Core::LinAlg::Initialization::zero};
+          }
+          default:
+          {
+            FOUR_C_THROW(
+                "{}", get_error_warning_info(std::format(
+                          "Invalid evaluation action {} for error status {} after verification of "
+                          "maximum Local Newton iterations reached",
+                          EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+          }
+        }
+      }
       else
       {
         verify_local_newton_exit(err_status);
@@ -3993,6 +4024,19 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
                         EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
         }
       }
+    }
+
+    {
+      namespace LocalNewtonLineSearch = Core::Utils::LineSearch;
+      const Core::LinAlg::Matrix<10, 1> current_sol = local_newton_manager_.sol();
+      auto merit =
+          [this, &local_integration_input, &current_sol, &dx](
+              const double alpha) -> LocalNewtonLineSearch::MeritResult<ViscoplastUtils::ErrorType>
+      {
+        return this->evaluate_local_newton_merit(alpha, current_sol, dx, local_integration_input);
+      };
+      MeritExportDebug::MeritCurveExporter::instance().maybe_export(
+          merit, merit_curve_trajectory_id, local_newton_manager_.iter(), 1.0);
     }
 
     // update solution vector, iteration counter and  increment norm
