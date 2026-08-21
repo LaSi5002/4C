@@ -303,6 +303,47 @@ namespace
     EXPECT_GE(derivative_alpha, hager_zhang_params.sigma * -8.0);
   }
 
+  TEST(CoreUtilsLineSearchTest, GoldenSectionSearchRejectsNonDescentDirection)
+  {
+    LineSearch::GoldenSectionSearch<TestEvaluationError> line_search(
+        make_step_control_params(), default_recovery());
+    const auto merit = [](const double alpha)
+    { return LineSearch::MeritResult<TestEvaluationError>{.value = alpha, .error = std::nullopt}; };
+
+    EXPECT_DOUBLE_EQ(line_search(1.0, 0.0, merit), 0.0);
+  }
+
+  TEST(CoreUtilsLineSearchTest, GoldenSectionSearchFindsExactMinimizer)
+  {
+    auto step_control = make_step_control_params();
+    step_control.max_iter = 50;
+    LineSearch::GoldenSectionSearch<TestEvaluationError> line_search(
+        step_control, default_recovery());
+    const auto merit = [](const double alpha)
+    {
+      return LineSearch::MeritResult<TestEvaluationError>{
+          .value = (alpha - 4.0) * (alpha - 4.0), .error = std::nullopt};
+    };
+
+    EXPECT_NEAR(line_search(-8.0, 16.0, merit), 4.0, 1.0e-6);
+  }
+
+  TEST(CoreUtilsLineSearchTest, GoldenSectionSearchFindsMinimizerWhenFirstTrialAlreadyIncreases)
+  {
+    auto step_control = make_step_control_params();
+    step_control.alpha_init = 10.0;
+    step_control.max_iter = 50;
+    LineSearch::GoldenSectionSearch<TestEvaluationError> line_search(
+        step_control, default_recovery());
+    const auto merit = [](const double alpha)
+    {
+      return LineSearch::MeritResult<TestEvaluationError>{
+          .value = (alpha - 1.0) * (alpha - 1.0), .error = std::nullopt};
+    };
+
+    EXPECT_NEAR(line_search(-2.0, 1.0, merit), 1.0, 1.0e-6);
+  }
+
   TEST(CoreUtilsLineSearchTest, MoreThuenteInterpolatesWhenInitialStepIsTooLow)
   {
     auto step_control = make_step_control_params();

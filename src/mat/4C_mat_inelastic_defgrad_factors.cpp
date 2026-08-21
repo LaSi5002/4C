@@ -1792,6 +1792,7 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::InelasticDefgradTransvIsotrop
       tensor_interpolator_(init_tensor_interpolator()),
       local_substepping_utils_(0.0),
       local_newton_manager_(parameter()->local_newton_params()),
+      line_search_(build_line_search()),
       adaptive_estimate_interp_manager_(
           parameter()->use_adaptive_estimate_interpolation()
               ? std::make_optional(
@@ -3884,10 +3885,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
         manage_evaluation(err_status, local_integration_input, eval_action);
         switch (eval_action)
         {
-          case (ViscoplastUtils::EvaluationAction::continue_current_iteration):
-          {
-            break;
-          }
           case (ViscoplastUtils::EvaluationAction::continue_with_next_iteration):
           {
             local_newton_manager_.increment_iter();
@@ -3924,11 +3921,6 @@ Core::LinAlg::Matrix<10, 1> Mat::InelasticDefgradTransvIsotropElastViscoplast::l
         manage_evaluation(err_status, local_integration_input, eval_action);
         switch (eval_action)
         {
-          case (ViscoplastUtils::EvaluationAction::continue_current_iteration):
-          {
-            // continue evaluation
-            break;
-          }
           case (ViscoplastUtils::EvaluationAction::continue_with_next_iteration):
           {
             // proceed with next iteration after performing adjustments due

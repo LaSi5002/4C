@@ -624,6 +624,104 @@ namespace Core::Utils::LineSearch
     Condition condition_;
   };
 
+  template <typename Error>
+    requires std::is_enum_v<Error>
+  class GoldenSectionSearch final : public LineSearch<Error>
+  {
+   public:
+    explicit GoldenSectionSearch(const StepControlParams& params,
+        RecoveryPolicy<Error> recovery_policy = RecoveryPolicy<Error>{})
+        : LineSearch<Error>(params), recovery_policy_(std::move(recovery_policy))
+    {
+    }
+
+    [[nodiscard]] double operator()(
+        const double dmerit_da_0, const double merit_0, MeritFunction<Error> merit) override
+    {
+      if (!std::isfinite(dmerit_da_0) || dmerit_da_0 >= 0.0 || !std::isfinite(merit_0)) return 0.0;
+
+      int iter = 0;
+      const auto eval = [this, &merit, &iter](const double alpha) -> std::optional<double>
+      {
+        ++iter;
+        const MeritResult<Error> result = merit(alpha);
+        if (!result.error.has_value()) return result.value;
+
+        const RecoveryAction recovery = recovery_policy_(*result.error);
+        if (std::holds_alternative<AbortLineSearch>(recovery)) return std::nullopt;
+        return std::numeric_limits<double>::infinity();
+      };
+
+      double lo = 0.0, merit_lo = merit_0;
+      double mid = this->params_.alpha_init;
+      const auto merit_mid_opt = eval(mid);
+      if (!merit_mid_opt) return 0.0;
+      double merit_mid = *merit_mid_opt;
+      double hi = mid, merit_hi = merit_mid;
+
+      while (merit_mid < merit_lo)
+      {
+        if (iter >= this->params_.max_iter) return 0.0;
+        hi = mid * growth_factor;
+        const auto merit_hi_opt = eval(hi);
+        if (!merit_hi_opt) return 0.0;
+        merit_hi = *merit_hi_opt;
+        if (merit_hi >= merit_mid) break;
+
+        lo = mid;
+        merit_lo = merit_mid;
+        mid = hi;
+        merit_mid = merit_hi;
+      }
+
+      double a = lo, b = hi;
+      double x1 = a + invphi2 * (b - a);
+      double x2 = a + invphi * (b - a);
+      auto f1_opt = eval(x1);
+      if (!f1_opt) return 0.0;
+      double f1 = *f1_opt;
+      auto f2_opt = eval(x2);
+      if (!f2_opt) return 0.0;
+      double f2 = *f2_opt;
+
+      while (iter < this->params_.max_iter && (b - a) > bracket_tolerance * (1.0 + b))
+      {
+        if (f1 < f2)
+        {
+          b = x2;
+          x2 = x1;
+          f2 = f1;
+          x1 = a + invphi2 * (b - a);
+          const auto f1_opt2 = eval(x1);
+          if (!f1_opt2) return 0.0;
+          f1 = *f1_opt2;
+        }
+        else
+        {
+          a = x1;
+          x1 = x2;
+          f1 = f2;
+          x2 = a + invphi * (b - a);
+          const auto f2_opt2 = eval(x2);
+          if (!f2_opt2) return 0.0;
+          f2 = *f2_opt2;
+        }
+      }
+
+      const double best_alpha = (f1 <= f2) ? x1 : x2;
+      const double best_merit = std::min(f1, f2);
+      if (!std::isfinite(best_merit) || best_merit >= merit_0 || best_alpha <= 0.0) return 0.0;
+      return best_alpha;
+    }
+
+   private:
+    static constexpr double growth_factor = 2.0;
+    static constexpr double bracket_tolerance = 1.0e-8;
+    static constexpr double invphi = 0.6180339887498949;
+    static constexpr double invphi2 = 0.3819660112501051;
+    RecoveryPolicy<Error> recovery_policy_;
+  };
+
   template <typename Condition, typename Error>
     requires DMeritLineSearchCondition<Condition, Error>
   class MoreThuente final : public LineSearch<Error>

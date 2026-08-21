@@ -29,7 +29,8 @@ namespace Core::Utils::LineSearch
     grippo_lampariello_lucidi_safeguarded_quadratic_backtracking,
     zhang_hager_nonmonotone_armijo_backtracking,
     zhang_hager_nonmonotone_armijo_safeguarded_quadratic_backtracking,
-    hager_zhang
+    hager_zhang,
+    golden_section
   };
 
   //! step control parameters for line search algorithms

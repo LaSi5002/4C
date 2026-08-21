@@ -191,10 +191,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
         manage_evaluation(err_status, local_integration_input, eval_action);
         switch (eval_action)
         {
-          case ViscoplastUtils::EvaluationAction::continue_current_iteration:
-          {
-            break;
-          }
           case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
           {
             local_newton_manager_.increment_iter();
@@ -227,10 +223,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
       manage_evaluation(err_status, local_integration_input, eval_action);
       switch (eval_action)
       {
-        case ViscoplastUtils::EvaluationAction::continue_current_iteration:
-        {
-          break;
-        }
         case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
         {
           local_newton_manager_.increment_iter();
@@ -283,10 +275,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
       manage_evaluation(err_status, local_integration_input, eval_action);
       switch (eval_action)
       {
-        case ViscoplastUtils::EvaluationAction::continue_current_iteration:
-        {
-          break;
-        }
         case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
         {
           local_newton_manager_.increment_iter();
@@ -340,10 +328,6 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::globalized_local_newton_with_
       manage_evaluation(err_status, local_integration_input, eval_action);
       switch (eval_action)
       {
-        case ViscoplastUtils::EvaluationAction::continue_current_iteration:
-        {
-          continue;
-        }
         case ViscoplastUtils::EvaluationAction::continue_with_next_iteration:
         {
           local_newton_manager_.increment_iter();
@@ -381,147 +365,146 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::run_local_newton_solve(
         local_integration_input,
     InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status)
 {
+  if (!line_search_) return local_newton_loop(local_integration_input, err_status);
+
+  return globalized_local_newton_with_line_search(
+      local_integration_input, *line_search_, err_status);
+}
+
+std::unique_ptr<Core::Utils::LineSearch::LineSearch<
+    Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>>
+Mat::InelasticDefgradTransvIsotropElastViscoplast::build_line_search() const
+{
   const auto& line_search_params = parameter()->local_newton_params().line_search;
-  std::unique_ptr<LocalNewtonLineSearch::LineSearch<ViscoplastUtils::ErrorType>> line_search;
   switch (line_search_params.type)
   {
     case LocalNewtonLineSearch::LineSearchType::none:
     {
-      // default value. If no line search is specified, the local Newton is run without line search
-      return local_newton_loop(local_integration_input, err_status);
+      return nullptr;
     }
     case LocalNewtonLineSearch::LineSearchType::armijo_backtracking:
     {
       using Condition = LocalNewtonLineSearch::ArmijoCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::Backtracking<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params), line_search_params.reduction_factor,
           Condition(line_search_params.armijo,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::armijo_safeguarded_quadratic_backtracking:
     {
       using Condition = LocalNewtonLineSearch::ArmijoCondition<ViscoplastUtils::ErrorType>;
-      line_search =
-          std::make_unique<LocalNewtonLineSearch::SafeguardedQuadraticBacktracking<Condition,
-              ViscoplastUtils::ErrorType>>(step_control_params(line_search_params),
-              Condition(line_search_params.armijo,
-                  viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
+      return std::make_unique<LocalNewtonLineSearch::SafeguardedQuadraticBacktracking<Condition,
+          ViscoplastUtils::ErrorType>>(step_control_params(line_search_params),
+          Condition(line_search_params.armijo,
+              viscoplastic_error_recovery(line_search_params.recovery_policy)));
     }
     case LocalNewtonLineSearch::LineSearchType::goldstein_simple_bisection:
     {
       using Condition = LocalNewtonLineSearch::GoldsteinCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::SimpleBisection<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params),
           Condition(line_search_params.goldstein,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::weak_wolfe_simple_bisection:
     {
       using Condition = LocalNewtonLineSearch::WeakWolfeCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::SimpleBisection<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params),
           Condition(line_search_params.wolfe,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::weak_wolfe_more_thuente:
     {
       using Condition = LocalNewtonLineSearch::WeakWolfeCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::MoreThuente<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params), line_search_params.wolfe.c1,
           Condition(line_search_params.wolfe,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::strong_wolfe_simple_bisection:
     {
       using Condition = LocalNewtonLineSearch::StrongWolfeCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::SimpleBisection<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params),
           Condition(line_search_params.wolfe,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::strong_wolfe_more_thuente:
     {
       using Condition = LocalNewtonLineSearch::StrongWolfeCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::MoreThuente<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params), line_search_params.wolfe.c1,
           Condition(line_search_params.wolfe,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::dai_kou_simple_bisection:
     {
       using Condition = LocalNewtonLineSearch::DaiKouCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::SimpleBisection<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params),
           Condition(line_search_params.dai_kou,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::grippo_lampariello_lucidi_backtracking:
     {
       using Condition =
           LocalNewtonLineSearch::GrippoLamparielloLucidiCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::Backtracking<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params), line_search_params.reduction_factor,
           Condition(line_search_params.grippo_lampariello_lucidi,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::
         grippo_lampariello_lucidi_safeguarded_quadratic_backtracking:
     {
       using Condition =
           LocalNewtonLineSearch::GrippoLamparielloLucidiCondition<ViscoplastUtils::ErrorType>;
-      line_search =
-          std::make_unique<LocalNewtonLineSearch::SafeguardedQuadraticBacktracking<Condition,
-              ViscoplastUtils::ErrorType>>(step_control_params(line_search_params),
-              Condition(line_search_params.grippo_lampariello_lucidi,
-                  viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
+      return std::make_unique<LocalNewtonLineSearch::SafeguardedQuadraticBacktracking<Condition,
+          ViscoplastUtils::ErrorType>>(step_control_params(line_search_params),
+          Condition(line_search_params.grippo_lampariello_lucidi,
+              viscoplastic_error_recovery(line_search_params.recovery_policy)));
     }
     case LocalNewtonLineSearch::LineSearchType::zhang_hager_nonmonotone_armijo_backtracking:
     {
       using Condition =
           LocalNewtonLineSearch::ZhangHagerNonmonotoneArmijoCondition<ViscoplastUtils::ErrorType>;
-      line_search = std::make_unique<
+      return std::make_unique<
           LocalNewtonLineSearch::Backtracking<Condition, ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params), line_search_params.reduction_factor,
           Condition(line_search_params.zhang_hager_nonmonotone,
               viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
     }
     case LocalNewtonLineSearch::LineSearchType::
         zhang_hager_nonmonotone_armijo_safeguarded_quadratic_backtracking:
     {
       using Condition =
           LocalNewtonLineSearch::ZhangHagerNonmonotoneArmijoCondition<ViscoplastUtils::ErrorType>;
-      line_search =
-          std::make_unique<LocalNewtonLineSearch::SafeguardedQuadraticBacktracking<Condition,
-              ViscoplastUtils::ErrorType>>(step_control_params(line_search_params),
-              Condition(line_search_params.zhang_hager_nonmonotone,
-                  viscoplastic_error_recovery(line_search_params.recovery_policy)));
-      break;
+      return std::make_unique<LocalNewtonLineSearch::SafeguardedQuadraticBacktracking<Condition,
+          ViscoplastUtils::ErrorType>>(step_control_params(line_search_params),
+          Condition(line_search_params.zhang_hager_nonmonotone,
+              viscoplastic_error_recovery(line_search_params.recovery_policy)));
     }
     case LocalNewtonLineSearch::LineSearchType::hager_zhang:
     {
-      line_search = std::make_unique<LocalNewtonLineSearch::HagerZhang<ViscoplastUtils::ErrorType>>(
+      return std::make_unique<LocalNewtonLineSearch::HagerZhang<ViscoplastUtils::ErrorType>>(
           step_control_params(line_search_params), line_search_params.hager_zhang,
           viscoplastic_error_recovery(line_search_params.recovery_policy));
-      break;
+    }
+    case LocalNewtonLineSearch::LineSearchType::golden_section:
+    {
+      return std::make_unique<
+          LocalNewtonLineSearch::GoldenSectionSearch<ViscoplastUtils::ErrorType>>(
+          step_control_params(line_search_params),
+          viscoplastic_error_recovery(line_search_params.recovery_policy));
     }
     default:
     {
@@ -529,9 +512,7 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::run_local_newton_solve(
           EnumTools::enum_name(line_search_params.type));
     }
   }
-
-  return globalized_local_newton_with_line_search(
-      local_integration_input, *line_search, err_status);
 }
+
 
 FOUR_C_NAMESPACE_CLOSE

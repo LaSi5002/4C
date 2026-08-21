@@ -1721,6 +1721,10 @@ namespace Mat
     //! dedicated Local Newton manager containing settings and iteration data
     InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager local_newton_manager_;
 
+    std::unique_ptr<Core::Utils::LineSearch::LineSearch<
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>>
+        line_search_;
+
     //! vector tracking whether there is plastic flow at each Gauss point
     std::vector<bool> is_plastic_gp_;
 
@@ -1877,6 +1881,10 @@ namespace Mat
         const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
             local_integration_input,
         InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status);
+
+    std::unique_ptr<Core::Utils::LineSearch::LineSearch<
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>>
+    build_line_search() const;
 
 
     /*!
