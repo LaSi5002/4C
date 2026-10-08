@@ -93,7 +93,19 @@ bool Solid::TimeInt::NoxInterface::compute_f(const Core::LinAlg::Vector<double>&
    * right hand side inside NOX for the convergence check, etc.               */
   dbc_ptr_->apply_dirichlet_to_rhs(f);
 
+  record_global_residual_norm(f);
+
   return true;
+}
+
+/*----------------------------------------------------------------------------*
+ *----------------------------------------------------------------------------*/
+void Solid::TimeInt::NoxInterface::record_global_residual_norm(
+    const Core::LinAlg::Vector<double>& rhs)
+{
+  double rhs_norm = 0.0;
+  rhs.norm_2(&rhs_norm);
+  gstate_ptr_->record_global_residual_norm(rhs_norm);
 }
 
 /*----------------------------------------------------------------------------*
@@ -125,6 +137,8 @@ bool Solid::TimeInt::NoxInterface::compute_f_and_jacobian(const Core::LinAlg::Ve
   /* Apply the DBC on the right hand side, since we need the Dirichlet free
    * right hand side inside NOX for the convergence check, etc.               */
   dbc_ptr_->apply_dirichlet_to_rhs(rhs);
+
+  record_global_residual_norm(rhs);
 
   /* We do not consider the jacobian DBC at this point. The Dirichlet conditions
    * are applied inside the NOX::Nln::LinearSystem::apply_jacobian_inverse()

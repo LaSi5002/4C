@@ -142,6 +142,8 @@ namespace Solid
       void find_constraint_models(const ::NOX::Abstract::Group* grp,
           std::vector<Solid::ModelType>& constraint_models) const;
 
+      void record_global_residual_norm(const Core::LinAlg::Vector<double>& rhs);
+
      protected:
       //! init flag
       bool isinit_;
