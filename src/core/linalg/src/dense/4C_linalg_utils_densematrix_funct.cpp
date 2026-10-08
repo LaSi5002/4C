@@ -12,6 +12,7 @@
 #include "4C_fem_general_cell_type.hpp"
 #include "4C_fem_general_utils_integration.hpp"
 #include "4C_linalg_fixedsizematrix.hpp"
+#include "4C_linalg_fixedsizematrix_solver.hpp"
 #include "4C_linalg_fixedsizematrix_tensor_derivatives.hpp"
 #include "4C_linalg_fixedsizematrix_tensor_products.hpp"
 #include "4C_linalg_fixedsizematrix_voigt_notation.hpp"
@@ -24,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include <string>
+#include <vector>
 
 
 FOUR_C_NAMESPACE_OPEN
@@ -610,9 +612,8 @@ namespace
     }
   }
 
-  // matrix_log: inverse scaling and squaring
   template <unsigned int dim>
-  Core::LinAlg::Matrix<dim, dim> matrix_log_inv_scal_square(
+  std::vector<Core::LinAlg::Matrix<dim, dim>> inv_scal_square_roots(
       const Core::LinAlg::Matrix<dim, dim>& input, unsigned int& pade_order,
       Core::LinAlg::MatrixFunctErrorType& err_status)
   {
@@ -621,12 +622,8 @@ namespace
     for (unsigned int i = 0; i < dim; ++i) id(i, i) = 1.0;
     Core::LinAlg::Matrix<dim, dim> temp{Core::LinAlg::Initialization::zero};
 
-    // declare output
-    Core::LinAlg::Matrix<dim, dim> output{Core::LinAlg::Initialization::zero};
+    std::vector<Core::LinAlg::Matrix<dim, dim>> roots;
 
-    // initialize number of square roots \f$ k \f$, number of iterations for DB iteration \f$
-    // \text{it} \f$, and number of norm checks \f$ p \f$
-    unsigned int k = 0;
     unsigned int it = 5;
     unsigned int p = 0;
 
@@ -712,16 +709,32 @@ namespace
       // return with error if computation of the matrix sqrt fails
       if (err_status != Core::LinAlg::MatrixFunctErrorType::no_errors)
       {
-        return Core::LinAlg::Matrix<dim, dim>{Core::LinAlg::Initialization::zero};
+        return {};
       }
+      roots.push_back(A);
+    }
 
-      // increment square root iterator
-      k += 1;
+    pade_order = m;
+    return roots;
+  }
+
+  template <unsigned int dim>
+  Core::LinAlg::Matrix<dim, dim> matrix_log_inv_scal_square(
+      const Core::LinAlg::Matrix<dim, dim>& input, unsigned int& pade_order,
+      Core::LinAlg::MatrixFunctErrorType& err_status)
+  {
+    unsigned int m = 0;
+    const std::vector<Core::LinAlg::Matrix<dim, dim>> roots =
+        inv_scal_square_roots(input, m, err_status);
+    if (err_status != Core::LinAlg::MatrixFunctErrorType::no_errors)
+    {
+      return Core::LinAlg::Matrix<dim, dim>{Core::LinAlg::Initialization::zero};
     }
 
     // determine the matrix logarithm of the k-th square root using the Pade approximation of
     // order
     // m
+    const Core::LinAlg::Matrix<dim, dim>& A = roots.empty() ? input : roots.back();
     Core::LinAlg::Matrix<dim, dim> k_sqrt_log = matrix_log_pade_part_fract_exp(A, m, err_status);
 
     // return scaled matrix logarithm
@@ -730,7 +743,8 @@ namespace
       // save the determined order as output
       pade_order = m;
 
-      output.update(std::pow(2.0, k), k_sqrt_log, 0.0);
+      Core::LinAlg::Matrix<dim, dim> output{Core::LinAlg::Initialization::zero};
+      output.update(std::pow(2.0, roots.size()), k_sqrt_log, 0.0);
       return output;
     }
     else
@@ -1629,6 +1643,51 @@ Core::LinAlg::Matrix<9, 9> Core::LinAlg::matrix_3x3_log_1st_deriv(
     default:
       return matrix_3x3_log_1st_deriv(input, err_status);
   }
+}
+
+/*--------------------------------------------------------------------*
+ *--------------------------------------------------------------------*/
+Core::LinAlg::Matrix<9, 9> Core::LinAlg::matrix_3x3_log_1st_deriv_inv_scal_square(
+    const Core::LinAlg::Matrix<3, 3>& input, Core::LinAlg::MatrixFunctErrorType& err_status)
+{
+  err_status = MatrixFunctErrorType::no_errors;
+
+  unsigned int pade_order = 0;
+  const std::vector<Core::LinAlg::Matrix<3, 3>> roots =
+      inv_scal_square_roots(input, pade_order, err_status);
+  if (err_status != MatrixFunctErrorType::no_errors)
+    return Core::LinAlg::Matrix<9, 9>{Initialization::zero};
+
+  Core::LinAlg::Matrix<3, 3> id_3x3(Initialization::zero);
+  for (int i = 0; i < 3; ++i) id_3x3(i, i) = 1.0;
+
+  Core::LinAlg::Matrix<9, 9> dAk_dinput(Initialization::zero);
+  Core::LinAlg::FourTensorOperations::add_non_symmetric_product(1.0, id_3x3, id_3x3, dAk_dinput);
+  for (const auto& root : roots)
+  {
+    Core::LinAlg::Matrix<9, 9> kronecker_sum(Initialization::zero);
+    Core::LinAlg::FourTensorOperations::add_non_symmetric_product(1.0, root, id_3x3, kronecker_sum);
+    Core::LinAlg::FourTensorOperations::add_non_symmetric_product(1.0, id_3x3, root, kronecker_sum);
+    Core::LinAlg::Matrix<9, 9> dAprev_dinput(dAk_dinput);
+    Core::LinAlg::FixedSizeSerialDenseSolver<9, 9, 9> solver;
+    solver.set_matrix(kronecker_sum);
+    solver.set_vectors(dAk_dinput, dAprev_dinput);
+    if (solver.solve() != 0)
+    {
+      err_status = MatrixFunctErrorType::failed_computation;
+      return Core::LinAlg::Matrix<9, 9>{Initialization::zero};
+    }
+  }
+
+  const Core::LinAlg::Matrix<3, 3>& Ak = roots.empty() ? input : roots.back();
+  const Core::LinAlg::Matrix<9, 9> dlog_dAk =
+      matrix_3x3_log_1st_deriv_pade_part_fract(Ak, err_status, pade_order);
+  if (err_status != MatrixFunctErrorType::no_errors)
+    return Core::LinAlg::Matrix<9, 9>{Initialization::zero};
+
+  Core::LinAlg::Matrix<9, 9> output(Initialization::zero);
+  output.multiply(std::pow(2.0, roots.size()), dlog_dAk, dAk_dinput, 0.0);
+  return output;
 }
 
 

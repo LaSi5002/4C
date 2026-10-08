@@ -219,15 +219,6 @@ namespace Mat
       perturbation_based,  ///< linearization based on perturbing the current state
     };
 
-    //! matrix exponential and logarithm evaluation utilities
-    struct MatrixExpLogUtils
-    {
-      //! Pade approximation order (to be used consistently: the
-      //! derivative of the matrix functions should use the same Pade
-      //! order as the evaluation of the matrix functions)
-      unsigned int pade_order = 16;  // by default we set the highest order currently implemented
-    };
-
     //! struct containing time step settings and time trackers
     struct TimeStepTracker
     {

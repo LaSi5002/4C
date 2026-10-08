@@ -240,6 +240,14 @@ namespace Core::LinAlg
       GenMatrixLogFirstDerivCalcMethod calc_method =
           GenMatrixLogFirstDerivCalcMethod::pade_part_fract);
 
+  /*! @brief Computes the derivative of the matrix logarithm using inverse scaling and squaring
+   *
+   * The derivative is propagated through every matrix square root used by the inverse scaling and
+   * squaring algorithm before differentiating the Pade approximation at the scaled matrix.
+   */
+  Matrix<9, 9> matrix_3x3_log_1st_deriv_inv_scal_square(
+      const Matrix<3, 3>& input, MatrixFunctErrorType& err_status);
+
   //! @}
 
   /// enum class: computation method used for the calculation of the first derivative of the matrix

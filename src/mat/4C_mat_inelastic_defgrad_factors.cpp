@@ -3464,13 +3464,9 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_residua
                                                              // scaling and squaring
                                                              // method
     {
-      // when computing the matrix logarithm with the inverse scaling
-      // and squaring, we also save the resulting Pade
-      // order via the dedicated pointer. This will be helpful when we
-      // compute the derivative - we want consistent Pade orders for the
-      // evaluations of functions and their derivatives.
+      unsigned int pade_order = 0;
       logT = Core::LinAlg::matrix_log(
-          T, log_err_status, matrix_exp_log_utils_.pade_order, parameter()->mat_log_calc_method());
+          T, log_err_status, pade_order, parameter()->mat_log_calc_method());
     }
     else  // evaluation using other provided methods
     {
@@ -3605,16 +3601,11 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_jacobia
                 pade_part_fract))  // evaluation using the Pade partial fraction
                                    // expansion?...
     {
-      // check whether the logarithm was evaluated with the inverse
-      // scaling and squaring method, for which we have also determined
-      // a suitable Pade order -> if not so, then we throw error, since
-      // this is the only implemented case for now!
       FOUR_C_ASSERT_ALWAYS(
           parameter()->mat_log_calc_method() == Core::LinAlg::MatrixLogCalcMethod::inv_scal_square,
           "Combination of logarithm evaluation methods not implemented yet!");
 
-      dlogTdT = Core::LinAlg::matrix_3x3_log_1st_deriv(T, log_err_status,
-          matrix_exp_log_utils_.pade_order, parameter()->mat_log_deriv_calc_method());
+      dlogTdT = Core::LinAlg::matrix_3x3_log_1st_deriv_inv_scal_square(T, log_err_status);
     }
     else  // evaluation using other provided methods?...
     {

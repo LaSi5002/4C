@@ -10,6 +10,7 @@
 #include "4C_linalg_utils_densematrix_funct.hpp"
 
 #include "4C_linalg_fixedsizematrix.hpp"
+#include "4C_linalg_fixedsizematrix_voigt_notation.hpp"
 #include "4C_linalg_serialdensematrix.hpp"
 #include "4C_linalg_serialdensevector.hpp"
 #include "4C_unittest_utils_assertions_test.hpp"
@@ -613,6 +614,58 @@ namespace
         "Evaluation of logarithm derivative failed when using the Pade approximation (partial "
         "fraction expansion)!");
     FOUR_C_EXPECT_NEAR(dlog_dA, dlog_dA_ref, 1.0e-9);
+
+    log_err_status = Core::LinAlg::MatrixFunctErrorType::no_errors;
+    dlog_dA = Core::LinAlg::matrix_3x3_log_1st_deriv_inv_scal_square(A, log_err_status);
+    FOUR_C_ASSERT_ALWAYS(log_err_status == Core::LinAlg::MatrixFunctErrorType::no_errors,
+        "Evaluation of logarithm derivative failed when using the inverse scaling and squaring!");
+    FOUR_C_EXPECT_NEAR(dlog_dA, dlog_dA_ref, 1.0e-9);
+  }
+
+  TEST(LinalgDenseMatrixExpLogTest, MatrixLog1stDerivInvScalSquareConsistentWithLog)
+  {
+    Core::LinAlg::Matrix<3, 3> A(Core::LinAlg::Initialization::zero);
+    A(0, 0) = -1.2990381057;
+    A(0, 1) = -0.8598076211;
+    A(0, 2) = -0.1866025404;
+    A(1, 0) = 0.75;
+    A(1, 1) = -0.8892304845;
+    A(1, 2) = -0.1232050808;
+    A(2, 0) = 0.1;
+    A(2, 1) = 0.0;
+    A(2, 2) = 0.9;
+
+    auto err_status = Core::LinAlg::MatrixFunctErrorType::no_errors;
+    const Core::LinAlg::Matrix<9, 9> dlog_dA =
+        Core::LinAlg::matrix_3x3_log_1st_deriv_inv_scal_square(A, err_status);
+    ASSERT_EQ(err_status, Core::LinAlg::MatrixFunctErrorType::no_errors);
+
+    Core::LinAlg::Matrix<9, 9> dlog_dA_fd(Core::LinAlg::Initialization::zero);
+    const double h = 1.0e-6;
+    for (int j = 0; j < 9; ++j)
+    {
+      Core::LinAlg::Matrix<9, 1> e_j(Core::LinAlg::Initialization::zero);
+      e_j(j) = 1.0;
+      Core::LinAlg::Matrix<3, 3> E_j(Core::LinAlg::Initialization::zero);
+      Core::LinAlg::Voigt::matrix_9x1_to_3x3(e_j, E_j);
+      Core::LinAlg::Matrix<3, 3> A_plus(A), A_minus(A);
+      A_plus.update(h, E_j, 1.0);
+      A_minus.update(-h, E_j, 1.0);
+      unsigned int pade_order = 0;
+      const Core::LinAlg::Matrix<3, 3> log_plus = Core::LinAlg::matrix_log(
+          A_plus, err_status, pade_order, Core::LinAlg::MatrixLogCalcMethod::inv_scal_square);
+      ASSERT_EQ(err_status, Core::LinAlg::MatrixFunctErrorType::no_errors);
+      const Core::LinAlg::Matrix<3, 3> log_minus = Core::LinAlg::matrix_log(
+          A_minus, err_status, pade_order, Core::LinAlg::MatrixLogCalcMethod::inv_scal_square);
+      ASSERT_EQ(err_status, Core::LinAlg::MatrixFunctErrorType::no_errors);
+      Core::LinAlg::Matrix<9, 1> log_plus_V(Core::LinAlg::Initialization::zero);
+      Core::LinAlg::Matrix<9, 1> log_minus_V(Core::LinAlg::Initialization::zero);
+      Core::LinAlg::Voigt::matrix_3x3_to_9x1(log_plus, log_plus_V);
+      Core::LinAlg::Voigt::matrix_3x3_to_9x1(log_minus, log_minus_V);
+      for (int i = 0; i < 9; ++i) dlog_dA_fd(i, j) = (log_plus_V(i) - log_minus_V(i)) / (2.0 * h);
+    }
+
+    FOUR_C_EXPECT_NEAR(dlog_dA, dlog_dA_fd, 1.0e-6);
   }
 }  // namespace
 

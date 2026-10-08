@@ -1674,9 +1674,6 @@ namespace Mat
     //! fiber direction (director vector)
     Core::LinAlg::Matrix<3, 1> m_;
 
-    //! utilities for evaluating the matrix exponential and logarithm
-    InelasticDefgradTransvIsotropElastViscoplastUtils::MatrixExpLogUtils matrix_exp_log_utils_;
-
     //! boolean to control whether the history variables should be updated during evaluation
     bool update_hist_var_ = true;
 
