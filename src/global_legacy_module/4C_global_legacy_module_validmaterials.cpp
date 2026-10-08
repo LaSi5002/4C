@@ -2724,6 +2724,8 @@ std::unordered_map<Core::Materials::MaterialType, Core::IO::InputSpec> Global::v
     namespace ViscoplastUtils = Mat::InelasticDefgradTransvIsotropElastViscoplastUtils;
     namespace AEI =
         Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::AdaptiveEstimateInterpolation;
+    namespace LocalNewtonLineSearch = Core::Utils::LineSearch;
+
     known_materials[Core::Materials::mfi_transv_isotrop_elast_viscoplast] = group(
         "MAT_InelasticDefgradTransvIsotropElastViscoplast",
         {parameter<int>(
@@ -2844,12 +2846,256 @@ std::unordered_map<Core::Materials::MaterialType, Core::IO::InputSpec> Global::v
                                 &ViscoplastUtils::LocalNewtonParams::max_exceedance_fact_incr_tol)
 
                         }),
+                    parameter<bool>("USE_RATE_ELIMINATED_AND_INVERSE_FLOW_RULE_RESIDUAL",
+                        {.description =
+                                "use the rate-eliminated and inverse flow rule residual (only for "
+                                "TIME_INTEGRATION_HIST_VARS: logarithmic): the tensorial equations "
+                                "read ln(F_in,n F_in^-1) + (eps_p - eps_p,n) N~_p with L_p = "
+                                "epsdot_p N~_p, i.e. the plastic strain residual times N~_p is "
+                                "added, removing the stiff dt epsdot_p terms, and the plastic "
+                                "strain equation is replaced by the flow rule solved for the "
+                                "stress ratio, scaled by sigma_Y0 / E (requires a "
+                                "viscoplasticity law providing its inverse); otherwise, the "
+                                "tensorial equations read "
+                                "ln(F_in,n F_in^-1) + dt L_p",
+                            .default_value = false,
+                            .store = in_struct(&ViscoplastUtils::LocalNewtonParams::
+                                    use_rate_eliminated_and_inverse_flow_rule_residual)}),
                     parameter<ViscoplastUtils::LocalNewtonDiverCont>("DIVER_CONT",
                         {.description = "strategy to deal with divergence in the Local Newton Loop",
                             .default_value = ViscoplastUtils::LocalNewtonDiverCont::stop,
                             .store = in_struct(&ViscoplastUtils::LocalNewtonParams::diver_cont)
 
-                        })
+                        }),
+                    group<ViscoplastUtils::LocalNewtonLineSearchParams>("LINE_SEARCH",
+                        {
+                            parameter<LocalNewtonLineSearch::LineSearchType>("TYPE",
+                                {.description = "line-search algorithm used to globalize the "
+                                                "Local Newton loop",
+                                    .default_value = LocalNewtonLineSearch::LineSearchType::none,
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::type)}),
+                            parameter<double>("ALPHA_INIT",
+                                {.description = "initial trial stepsize for line search",
+                                    .default_value = 1.0,
+                                    .validator = positive<double>(),
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::alpha_init)}),
+                            parameter<int>("MAX_ITER",
+                                {.description = "maximum number of line-search iterations",
+                                    .default_value = 20,
+                                    .validator = positive<int>(),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::max_iter)}),
+                            parameter<double>("REDUCTION_FACTOR",
+                                {.description = "stepsize reduction factor used by fixed-factor "
+                                                "backtracking",
+                                    .default_value = 0.5,
+                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::reduction_factor)}),
+                            group<LocalNewtonLineSearch::ArmijoParams>("ARMIJO",
+                                {
+                                    parameter<double>("C1",
+                                        {.description = "Armijo sufficient decrease parameter",
+                                            .default_value = 1.0e-4,
+                                            .validator = in_range(excl(0.0), excl(1.0)),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::ArmijoParams::c1)}),
+                                },
+                                {.description = "Armijo-specific settings for the Local Newton "
+                                                "line search",
+                                    .required = false,
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonLineSearchParams::armijo)}),
+                            group<LocalNewtonLineSearch::GrippoLamparielloLucidiParams>(
+                                "GRIPPO_LAMPARIELLO_LUCIDI",
+                                {
+                                    parameter<double>(
+                                        "RHO", {.description = "Grippo-Lampariello-Lucidi "
+                                                               "sufficient-decrease parameter",
+                                                   .default_value = 1.0e-4,
+                                                   .validator = in_range(excl(0.0), excl(1.0)),
+                                                   .store = in_struct(&LocalNewtonLineSearch::
+                                                           GrippoLamparielloLucidiParams::rho)}),
+                                    parameter<int>("MAX_HISTORY",
+                                        {.description = "maximum number of previous merit values "
+                                                        "used by the nonmonotone condition",
+                                            .default_value = 10,
+                                            .validator = positive_or_zero<int>(),
+                                            .store = in_struct(&LocalNewtonLineSearch::
+                                                    GrippoLamparielloLucidiParams::max_history)}),
+                                },
+                                {.description = "Grippo-Lampariello-Lucidi-specific settings "
+                                                "for the Local Newton line search",
+                                    .required = false,
+                                    .store =
+                                        in_struct(&ViscoplastUtils::LocalNewtonLineSearchParams::
+                                                grippo_lampariello_lucidi)}),
+                            group<LocalNewtonLineSearch::BacktrackingParams>("BACKTRACKING",
+                                {
+                                    parameter<int>("MAX_LINE_SEARCH_ITERATIONS",
+                                        {.description =
+                                                "maximum number of rejected trial stepsizes of the "
+                                                "backtracking strategies at which the merit "
+                                                "function could be evaluated: once exhausted, the "
+                                                "last of them is returned instead of 0, which "
+                                                "implicitly bounds the stepsize from below; trials "
+                                                "with evaluation errors do not count, so the "
+                                                "stepsize keeps contracting through them; 0 "
+                                                "disables the budget",
+                                            .default_value = 0,
+                                            .validator = positive_or_zero<int>(),
+                                            .store = in_struct(
+                                                &LocalNewtonLineSearch::BacktrackingParams::
+                                                    max_line_search_iterations)}),
+                                },
+                                {.description = "settings shared by the backtracking strategies "
+                                                "of the Local Newton line search",
+                                    .required = false,
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::backtracking)}),
+                            group<LocalNewtonLineSearch::GoldenSectionParams>("GOLDEN_SECTION",
+                                {
+                                    parameter<double>("MIN_ALPHA",
+                                        {.description = "lower bound enforced on the stepsize "
+                                                        "returned by golden-section search",
+                                            .default_value = 0.0,
+                                            .validator = positive_or_zero<double>(),
+                                            .store = in_struct(&LocalNewtonLineSearch::
+                                                    GoldenSectionParams::min_alpha)}),
+                                    parameter<double>("INTERVAL_TOL",
+                                        {.description = "mixed absolute-relative tolerance on the "
+                                                        "interval width (b - a) <= INTERVAL_TOL * "
+                                                        "(1 + b) that terminates golden-section "
+                                                        "search",
+                                            .default_value = 1.0e-8,
+                                            .validator = positive<double>(),
+                                            .store = in_struct(&LocalNewtonLineSearch::
+                                                    GoldenSectionParams::interval_tol)}),
+                                },
+                                {.description = "Golden-Section-specific settings for the Local "
+                                                "Newton line search",
+                                    .required = false,
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::golden_section)}),
+                            group<ViscoplastUtils::LocalNewtonLineSearchRecoveryParams>(
+                                "RECOVERY_POLICY",
+                                {
+                                    parameter<ViscoplastUtils::RecoveryStrategy>("STRATEGY",
+                                        {.description =
+                                                "how the line search recovers from a "
+                                                "merit-evaluation error. abort and "
+                                                "treat_as_too_high apply uniformly to every "
+                                                "error; individual_contraction_factor instead "
+                                                "uses the per-error factors given in "
+                                                "INDIVIDUAL_CONTRACTION_FACTOR",
+                                            .default_value =
+                                                ViscoplastUtils::RecoveryStrategy::abort,
+                                            .store = in_struct(&ViscoplastUtils::
+                                                    LocalNewtonLineSearchRecoveryParams::
+                                                        strategy)}),
+                                    group<ViscoplastUtils::
+                                            LocalNewtonLineSearchIndividualContractionFactorParams>(
+                                        "INDIVIDUAL_CONTRACTION_FACTOR",
+                                        {
+                                            parameter<double>("OVERFLOW_ERROR",
+                                                {.description =
+                                                        "contraction factor for an overflow in "
+                                                        "the plastic strain increment "
+                                                        "evaluation",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                overflow_error)}),
+                                            parameter<double>("NEGATIVE_PLASTIC_STRAIN",
+                                                {.description = "contraction factor for a negative "
+                                                                "plastic strain encountered at the "
+                                                                "trial step",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                negative_plastic_strain)}),
+                                            parameter<double>("FAILED_MATRIX_LOG_EVALUATION",
+                                                {.description =
+                                                        "contraction factor for a failed matrix "
+                                                        "logarithm evaluation (logarithmic time "
+                                                        "integration)",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                failed_matrix_log_evaluation)}),
+                                            parameter<double>("FAILED_MATRIX_EXP_EVALUATION",
+                                                {.description =
+                                                        "contraction factor for a failed matrix "
+                                                        "exponential evaluation (standard time "
+                                                        "integration)",
+                                                    .default_value = 0.5,
+                                                    .validator = in_range(excl(0.0), excl(1.0)),
+                                                    .store = in_struct(&ViscoplastUtils::
+                                                            LocalNewtonLineSearchIndividualContractionFactorParams::
+                                                                failed_matrix_exp_evaluation)}),
+                                        },
+                                        {.description =
+                                                "per-error contraction factors, only used when "
+                                                "STRATEGY is individual_contraction_factor",
+                                            .required = false,
+                                            .store = in_struct(&ViscoplastUtils::
+                                                    LocalNewtonLineSearchRecoveryParams::
+                                                        individual_contraction_factor)}),
+                                },
+                                {.description = "recovery strategy used while evaluating the "
+                                                "merit function during line search",
+                                    .required = false,
+                                    .store = in_struct(&ViscoplastUtils::
+                                            LocalNewtonLineSearchParams::recovery_policy)}),
+                        },
+                        {.description = "Settings for line-search globalization of the Local "
+                                        "Newton loop",
+                            .required = false,
+                            .store = in_struct(&ViscoplastUtils::LocalNewtonParams::line_search)}),
+                    group<ViscoplastUtils::LocalNewtonAdaptiveTolParams>("ADAPTIVE_TOL",
+                        {
+                            parameter<ViscoplastUtils::LocalNewtonAdaptiveTolType>("TYPE",
+                                {.description =
+                                        "how the residual tolerance is chosen per material "
+                                        "evaluation: none = always RES_TOL; "
+                                        "global_residual_forcing = SAFETY * RES_TOL * (|R_k| / "
+                                        "R_target)^p, bounded to [RES_TOL, TOL_MAX], with |R_k| "
+                                        "the latest global residual norm of the time step and "
+                                        "R_target the norm at which the global residual test "
+                                        "(TOLRES, NORM_RESF) is met (TOL_MAX for the predictor "
+                                        "evaluation)",
+                                    .default_value =
+                                        ViscoplastUtils::LocalNewtonAdaptiveTolType::none,
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonAdaptiveTolParams::type)}),
+                            parameter<double>("TOL_MAX",
+                                {.description = "loosest residual tolerance ever used",
+                                    .default_value = 1.0e-4,
+                                    .validator = positive<double>(),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonAdaptiveTolParams::tol_max)}),
+                            parameter<double>("EXPONENT",
+                                {.description = "exponent p of the global residual ratio",
+                                    .default_value = 1.0,
+                                    .validator = positive<double>(),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonAdaptiveTolParams::exponent)}),
+                            parameter<double>("SAFETY",
+                                {.description = "safety factor multiplying RES_TOL",
+                                    .default_value = 1.0,
+                                    .validator = positive<double>(),
+                                    .store = in_struct(
+                                        &ViscoplastUtils::LocalNewtonAdaptiveTolParams::safety)}),
+                        },
+                        {.description = "Adaptation of the Local Newton residual tolerance to the "
+                                        "progress of the global Newton iteration",
+                            .required = false,
+                            .store = in_struct(&ViscoplastUtils::LocalNewtonParams::adaptive_tol)})
 
                 },
                 {.description = "Parameters used in the Local Newton--Raphson procedure "

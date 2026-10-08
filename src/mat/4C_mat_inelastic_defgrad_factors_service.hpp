@@ -15,6 +15,7 @@
 #include "4C_linalg_utils_scalar_interpolation.hpp"
 #include "4C_mat_multiplicative_split_defgrad_elasthyper_service.hpp"
 #include "4C_utils_exceptions.hpp"
+#include "4C_utils_linesearch_params.hpp"
 
 #include <cstdint>
 #include <format>
@@ -217,15 +218,6 @@ namespace Mat
       analytic,  ///< analytical linearization involving the solution of a linear system of
                  ///< equations,
       perturbation_based,  ///< linearization based on perturbing the current state
-    };
-
-    //! matrix exponential and logarithm evaluation utilities
-    struct MatrixExpLogUtils
-    {
-      //! Pade approximation order (to be used consistently: the
-      //! derivative of the matrix functions should use the same Pade
-      //! order as the evaluation of the matrix functions)
-      unsigned int pade_order = 16;  // by default we set the highest order currently implemented
     };
 
     //! struct containing time step settings and time trackers
@@ -518,6 +510,8 @@ namespace Mat
       //! plastic velocity gradient tensor
       Core::LinAlg::Matrix<3, 3> curr_lpM{Core::LinAlg::Initialization::zero};
 
+      Core::LinAlg::Matrix<3, 3> curr_lp_directionM{Core::LinAlg::Initialization::zero};
+
       //! plastic update tensor
       Core::LinAlg::Matrix<3, 3> curr_EpM{Core::LinAlg::Initialization::zero};
 
@@ -538,6 +532,7 @@ namespace Mat
                                         ///< evaluated
       equiv_stress_derivs_only,  ///< return in evaluate_state_quantities once the derivatives of
                                  ///< the equivalent stress has been evaluated
+      local_newton_jacobian,
     };
 
 
@@ -606,6 +601,9 @@ namespace Mat
       //! derivative of the plastic velocity gradient tensor w.r.t. the temperature
       //! (Voigt notation)
       Core::LinAlg::Matrix<9, 1> curr_dlpdT{Core::LinAlg::Initialization::zero};
+
+      Core::LinAlg::Matrix<9, 9> curr_dlp_direction_diFin{Core::LinAlg::Initialization::zero};
+      Core::LinAlg::Matrix<9, 6> curr_dlp_direction_dC{Core::LinAlg::Initialization::zero};
 
       //! derivative of the plastic update tensor w.r.t. the inverse inelastic deformation
       //! gradient (Voigt notation)
@@ -854,6 +852,66 @@ namespace Mat
 
 
 
+    enum class RecoveryStrategy
+    {
+      abort,
+      treat_as_too_high,
+      individual_contraction_factor
+    };
+
+    struct LocalNewtonLineSearchIndividualContractionFactorParams
+    {
+      double overflow_error;
+      double negative_plastic_strain;
+      double failed_matrix_log_evaluation;
+      double failed_matrix_exp_evaluation;
+    };
+
+    struct LocalNewtonLineSearchRecoveryParams
+    {
+      RecoveryStrategy strategy;
+
+      LocalNewtonLineSearchIndividualContractionFactorParams individual_contraction_factor;
+    };
+
+    struct LocalNewtonLineSearchParams
+    {
+      Core::Utils::LineSearch::LineSearchType type;
+
+      double alpha_init;
+
+      int max_iter;
+
+      double reduction_factor;
+
+      Core::Utils::LineSearch::BacktrackingParams backtracking;
+
+      Core::Utils::LineSearch::ArmijoParams armijo;
+
+      Core::Utils::LineSearch::GrippoLamparielloLucidiParams grippo_lampariello_lucidi;
+
+      Core::Utils::LineSearch::GoldenSectionParams golden_section;
+
+      LocalNewtonLineSearchRecoveryParams recovery_policy;
+    };
+
+    enum class LocalNewtonAdaptiveTolType
+    {
+      none,
+      global_residual_forcing,
+    };
+
+    struct LocalNewtonAdaptiveTolParams
+    {
+      LocalNewtonAdaptiveTolType type;
+
+      double tol_max;
+
+      double exponent;
+
+      double safety;
+    };
+
     //! struct containing parameter specifications for the Local Newton loop
     struct LocalNewtonParams
     {
@@ -881,6 +939,12 @@ namespace Mat
       //! employing the divergence management strategy for continuation with
       //! safeguard)
       double max_exceedance_fact_incr_tol;
+
+      LocalNewtonLineSearchParams line_search{};
+
+      LocalNewtonAdaptiveTolParams adaptive_tol{LocalNewtonAdaptiveTolType::none, 0.0, 0.0, 0.0};
+
+      bool use_rate_eliminated_and_inverse_flow_rule_residual{false};
     };
 
     //! class for managing the Local Newton loop, containing the utilized parameters and iteration
@@ -899,6 +963,12 @@ namespace Mat
 
       /// getter for Local Newton parameters
       [[nodiscard]] LocalNewtonParams params() const { return params_; }
+
+      [[nodiscard]] double res_tol() const { return res_tol_; }
+
+      void adapt_res_tol(double global_residual_norm_latest, double global_residual_norm_target);
+
+      void reset_res_tol() { res_tol_ = params_.res_tol; }
 
       /// getter for local iteration count
       [[nodiscard]] unsigned int iter() const { return iter_; }
@@ -1014,6 +1084,8 @@ namespace Mat
      private:
       //! Local Newton parameters
       const LocalNewtonParams params_;
+
+      double res_tol_;
 
       //! current local iteration
       unsigned int iter_;

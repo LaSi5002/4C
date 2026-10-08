@@ -22,6 +22,7 @@
 #include "4C_utils_parameter_list.fwd.hpp"
 
 #include <memory>
+#include <optional>
 
 namespace Teuchos
 {
@@ -357,6 +358,28 @@ namespace Solid
       {
         check_init();
         return restartstep_;
+      }
+
+      struct GlobalResidualNorms
+      {
+        double initial;
+        double latest;
+      };
+
+      void record_global_residual_norm(const double norm)
+      {
+        if (global_residual_norm_step_ != stepnp_)
+        {
+          global_residual_norm_step_ = stepnp_;
+          global_residual_norms_.initial = norm;
+        }
+        global_residual_norms_.latest = norm;
+      }
+
+      [[nodiscard]] std::optional<GlobalResidualNorms> get_global_residual_norms() const
+      {
+        if (global_residual_norm_step_ != stepnp_) return std::nullopt;
+        return global_residual_norms_;
       }
 
       /// Get the last number of linear iterations of the %step
@@ -946,6 +969,10 @@ namespace Solid
 
       /// A new time step started and we predict the new solution
       bool is_predictor_;
+
+      int global_residual_norm_step_ = -1;
+
+      GlobalResidualNorms global_residual_norms_{-1.0, -1.0};
       ///@}
 
       /// @name Global state vectors

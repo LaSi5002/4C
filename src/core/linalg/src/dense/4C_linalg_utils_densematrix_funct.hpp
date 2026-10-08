@@ -240,6 +240,9 @@ namespace Core::LinAlg
       GenMatrixLogFirstDerivCalcMethod calc_method =
           GenMatrixLogFirstDerivCalcMethod::pade_part_fract);
 
+  Matrix<9, 9> matrix_3x3_log_1st_deriv_inv_scal_square(
+      const Matrix<3, 3>& input, MatrixFunctErrorType& err_status);
+
   //! @}
 
   /// enum class: computation method used for the calculation of the first derivative of the matrix

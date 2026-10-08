@@ -138,6 +138,11 @@ namespace Mat
           Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status,
           const bool update_hist_var) override;
 
+      InverseFlowRuleResidual evaluate_inverse_flow_rule_residual(const double equiv_stress,
+          const double equiv_plastic_strain, const double plastic_strain_increment, const double dt,
+          const double youngs_modulus,
+          Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status) override;
+
       void setup(const int numgp, const Discret::Elements::Fibers& fibers,
           const std::optional<Discret::Elements::CoordinateSystem>& coord_system) override;
 

@@ -1792,12 +1792,21 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::InelasticDefgradTransvIsotrop
       tensor_interpolator_(init_tensor_interpolator()),
       local_substepping_utils_(0.0),
       local_newton_manager_(parameter()->local_newton_params()),
+      line_search_(build_line_search()),
       adaptive_estimate_interp_manager_(
           parameter()->use_adaptive_estimate_interpolation()
               ? std::make_optional(
                     AEI::AEIManager(parameter()->adaptive_estimate_interpolation_params()))
               : std::nullopt)
 {
+  if (use_rate_eliminated_and_inverse_flow_rule_residual() &&
+      parameter()->timint_type() != ViscoplastUtils::TimIntType::logarithmic)
+  {
+    FOUR_C_THROW(
+        "LOCAL_NEWTON/USE_RATE_ELIMINATED_AND_INVERSE_FLOW_RULE_RESIDUAL requires "
+        "TIME_INTEGRATION_HIST_VARS: logarithmic");
+  }
+
   // set time step size to 0.0 (this is set to the correct and current value in the
   // preevaluate method)
   time_step_tracker_.dt = 0.0;
@@ -1820,6 +1829,17 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::pre_evaluate(
 {
   // save parameter list
   params_ = params;
+
+  if (params.isParameter("global_residual_norm_latest") &&
+      params.isParameter("global_residual_norm_target"))
+  {
+    local_newton_manager_.adapt_res_tol(params.get<double>("global_residual_norm_latest"),
+        params.get<double>("global_residual_norm_target"));
+  }
+  else
+  {
+    local_newton_manager_.reset_res_tol();
+  }
 
   // set Gauss Point
   gp_ = gp;
@@ -1868,6 +1888,38 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::pre_evaluate(
   time_step_quantities_.pre_evaluate(gp);
   // call preevaluate method of the viscoplastic law
   viscoplastic_law_->pre_evaluate(params, gp);
+}
+
+/*--------------------------------------------------------------------*
+ *--------------------------------------------------------------------*/
+double Mat::InelasticDefgradTransvIsotropElastViscoplast::elastic_youngs_modulus() const
+{
+  if (!elastic_youngs_modulus_.has_value())
+  {
+    Core::LinAlg::Matrix<3, 1> prinv(Core::LinAlg::Initialization::uninitialized);
+    prinv(0) = 3.0;
+    prinv(1) = 3.0;
+    prinv(2) = 1.0;
+    Core::LinAlg::Matrix<3, 1> dPI(Core::LinAlg::Initialization::zero);
+    Core::LinAlg::Matrix<6, 1> ddPII(Core::LinAlg::Initialization::zero);
+    for (const auto& p : potsumel_)
+    {
+      p->add_derivatives_principal(dPI, ddPII, prinv, gp_, ele_gid_);
+    }
+
+    Core::LinAlg::SymmetricTensor<double, 3, 3> stress{};
+    Core::LinAlg::SymmetricTensor<double, 3, 3, 3, 3> cmat{};
+    Mat::elast_hyper_add_isotropic_stress_cmat(stress, cmat,
+        Core::LinAlg::TensorGenerators::identity<double, 3, 3>,
+        Core::LinAlg::TensorGenerators::identity<double, 3, 3>, prinv, dPI, ddPII);
+    const double lambda = cmat(0, 0, 1, 1);
+    const double mu = 0.5 * (cmat(0, 0, 0, 0) - cmat(0, 0, 1, 1));
+    FOUR_C_ASSERT_ALWAYS(mu > 0.0 && lambda + mu > 0.0,
+        "The isotropic elastic summands must yield a positive Young's modulus!");
+    elastic_youngs_modulus_ = mu * (3.0 * lambda + 2.0 * mu) / (lambda + mu);
+  }
+
+  return *elastic_youngs_modulus_;
 }
 
 /*--------------------------------------------------------------------*
@@ -2110,6 +2162,11 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantities(
         1.0, const_mat_tensors_.id_plus_mm, state_quantities.curr_dpM, 0.0);
     state_quantities.curr_lpM.multiply_nn(
         -1.0, state_quantities.curr_dpM, const_mat_tensors_.mm, 1.0);
+
+    state_quantities.curr_lp_directionM.multiply_nn(
+        1.0, const_mat_tensors_.id_plus_mm, state_quantities.curr_NpM, 0.0);
+    state_quantities.curr_lp_directionM.multiply_nn(
+        -1.0, state_quantities.curr_NpM, const_mat_tensors_.mm, 1.0);
   }
   else if (parameter()->mat_behavior() == ViscoplastUtils::MatBehavior::isotropic)
   {
@@ -2128,6 +2185,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantities(
 
     // calculate plastic velocity gradient tensor
     state_quantities.curr_lpM.update(1.0, state_quantities.curr_dpM, 0.0);
+
+    state_quantities.curr_lp_directionM.update(1.0, state_quantities.curr_NpM, 0.0);
   }
   else
   {
@@ -2195,53 +2254,82 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
   Core::LinAlg::Matrix<9, 9> temp9x9(Core::LinAlg::Initialization::zero);
   Core::LinAlg::FourTensor<3> temp_four_tensor(true);
 
+  const bool local_jacobian_only =
+      eval_type == ViscoplastUtils::StateQuantityDerivEvalType::local_newton_jacobian;
+  const bool rate_eliminated =
+      parameter()->timint_type() == ViscoplastUtils::TimIntType::logarithmic &&
+      use_rate_eliminated_and_inverse_flow_rule_residual();
+  const bool need_plastic_velocity_gradient_derivs = !local_jacobian_only || !rate_eliminated;
+
   // check whether to reevaluate the state or to keep the available state quantity values
-  ViscoplastUtils::StateQuantities relevant_state_quantities =
-      state_quantities.has_value()
-          ? state_quantities.value()
-          : evaluate_state_quantities(local_integration_input, iFinM, plastic_strain, err_status,
-                ViscoplastUtils::StateQuantityEvalType::full_eval);
+  std::optional<ViscoplastUtils::StateQuantities> reevaluated_state_quantities;
+  if (!state_quantities.has_value())
+  {
+    reevaluated_state_quantities = evaluate_state_quantities(local_integration_input, iFinM,
+        plastic_strain, err_status, ViscoplastUtils::StateQuantityEvalType::full_eval);
+  }
+  const ViscoplastUtils::StateQuantities& relevant_state_quantities =
+      state_quantities.has_value() ? *state_quantities : *reevaluated_state_quantities;
 
   // get the state quantities
-  const Core::LinAlg::Matrix<3, 3> CeM = relevant_state_quantities.curr_CeM;
-  const Core::LinAlg::Matrix<3, 1> gamma = relevant_state_quantities.curr_gamma;
-  const Core::LinAlg::Matrix<8, 1> delta = relevant_state_quantities.curr_delta;
-  const Core::LinAlg::Matrix<3, 3> SeM = relevant_state_quantities.curr_SeM;
-  const Core::LinAlg::Matrix<6, 6> dSedCe = relevant_state_quantities.curr_dSedCe;
-  const Core::LinAlg::Matrix<3, 3> Mtheta_dev_sym_M =
-      relevant_state_quantities.curr_Mtheta_dev_sym_M;
+  const Core::LinAlg::Matrix<3, 3>& CeM = relevant_state_quantities.curr_CeM;
+  const Core::LinAlg::Matrix<3, 1>& gamma = relevant_state_quantities.curr_gamma;
+  const Core::LinAlg::Matrix<8, 1>& delta = relevant_state_quantities.curr_delta;
+  const Core::LinAlg::Matrix<3, 3>& SeM = relevant_state_quantities.curr_SeM;
+  const Core::LinAlg::Matrix<6, 6>& dSedCe = relevant_state_quantities.curr_dSedCe;
   const double equiv_stress = relevant_state_quantities.curr_equiv_stress;
   const double equiv_plastic_strain_rate = relevant_state_quantities.curr_equiv_plastic_strain_rate;
-  const Core::LinAlg::Matrix<3, 3> NpM = relevant_state_quantities.curr_NpM;
-  const Core::LinAlg::Matrix<3, 3> dpM = relevant_state_quantities.curr_dpM;
-  const Core::LinAlg::Matrix<3, 3> lpM = relevant_state_quantities.curr_lpM;
-  const Core::LinAlg::Matrix<3, 3> EpM = relevant_state_quantities.curr_EpM;
-  const TensorAndTemperatureDerivative ST = relevant_state_quantities.curr_ST;
+  const Core::LinAlg::Matrix<3, 3>& NpM = relevant_state_quantities.curr_NpM;
+  const Core::LinAlg::Matrix<3, 3>& lpM = relevant_state_quantities.curr_lpM;
+  const TensorAndTemperatureDerivative& ST = relevant_state_quantities.curr_ST;
+  const auto S_T = make_matrix(get_full(ST.value));
+  bool thermal_stress = false;
+  for (unsigned i = 0; i < 3; ++i)
+    for (unsigned j = 0; j < 3; ++j) thermal_stress = thermal_stress || S_T(i, j) != 0.0;
+  const bool transv_isotropic =
+      parameter()->mat_behavior() == ViscoplastUtils::MatBehavior::transv_isotropic;
 
 
   // compute the relevant derivatives of the elastic right Cauchy-Green deformation tensor
-  Core::LinAlg::SymmetricTensor<double, 3, 3, 3, 3> dCedC_tensor;
   Core::LinAlg::Tensor<double, 3, 3, 3, 3> dCediFin_tensor;
-  Mat::elast_hyper_get_derivs_of_elastic_right_cg_tensor(Core::LinAlg::make_tensor(iFinM),
-      Core::LinAlg::assume_symmetry(Core::LinAlg::make_tensor(right_cg)), dCedC_tensor,
-      dCediFin_tensor);
-  state_quantity_derivatives.curr_dCedC =
-      Core::LinAlg::make_6x6_voigt_matrix_from_tensor(dCedC_tensor);
+  if (local_jacobian_only)
+  {
+    Mat::elast_hyper_get_deriv_of_elastic_right_cg_tensor_wrt_inverse_inelastic_defgrad(
+        Core::LinAlg::make_tensor(iFinM),
+        Core::LinAlg::assume_symmetry(Core::LinAlg::make_tensor(right_cg)), dCediFin_tensor);
+  }
+  else
+  {
+    Core::LinAlg::SymmetricTensor<double, 3, 3, 3, 3> dCedC_tensor;
+    Mat::elast_hyper_get_derivs_of_elastic_right_cg_tensor(Core::LinAlg::make_tensor(iFinM),
+        Core::LinAlg::assume_symmetry(Core::LinAlg::make_tensor(right_cg)), dCedC_tensor,
+        dCediFin_tensor);
+    state_quantity_derivatives.curr_dCedC =
+        Core::LinAlg::make_6x6_voigt_matrix_from_tensor(dCedC_tensor);
+  }
   state_quantity_derivatives.curr_dCediFin =
       Core::LinAlg::make_6x9_voigt_matrix_from_tensor(dCediFin_tensor);
-  // save these also as four tensors
   Core::LinAlg::FourTensor<3> dCediFin_FourTensor(true);
-  Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(
-      dCediFin_FourTensor, state_quantity_derivatives.curr_dCediFin);
+  if (thermal_stress || transv_isotropic)
+  {
+    Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(
+        dCediFin_FourTensor, state_quantity_derivatives.curr_dCediFin);
+  }
   Core::LinAlg::FourTensor<3> dCedC_FourTensor(true);
-  Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(
-      dCedC_FourTensor, state_quantity_derivatives.curr_dCedC);
+  if (!local_jacobian_only)
+  {
+    Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(
+        dCedC_FourTensor, state_quantity_derivatives.curr_dCedC);
+  }
 
   // inverse inelastic right Cauchy-Green deformation tensor
   Core::LinAlg::Matrix<3, 3> iCinM(Core::LinAlg::Initialization::zero);
-  iCinM.multiply_nt(1.0, iFinM, iFinM, 0.0);
   Core::LinAlg::Matrix<6, 1> iCinV(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCinM, iCinV);
+  if (!local_jacobian_only)
+  {
+    iCinM.multiply_nt(1.0, iFinM, iFinM, 0.0);
+    Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCinM, iCinV);
+  }
 
   // elastic right Cauchy-Green tensor in stress form
   Core::LinAlg::Matrix<6, 1> CeV(Core::LinAlg::Initialization::zero);  // stress-form
@@ -2253,9 +2341,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
   Core::LinAlg::Matrix<6, 1> iCeV(Core::LinAlg::Initialization::zero);  // stress-form
   Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCeM, iCeV);
 
-  // inverse transposed inelastic defgrad
   Core::LinAlg::Matrix<3, 3> iFinTM(Core::LinAlg::Initialization::zero);
-  iFinTM.multiply_tn(1.0, iFinM, const_non_mat_tensors.id3x3, 0.0);
+  if (!local_jacobian_only) iFinTM.multiply_tn(1.0, iFinM, const_non_mat_tensors.id3x3, 0.0);
 
   // calculate various other helper tensors required for subsequent computation
   Core::LinAlg::Matrix<3, 3> CiFinM(Core::LinAlg::Initialization::zero);
@@ -2286,20 +2373,22 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
   Core::LinAlg::Voigt::matrix_3x3_to_9x1(CiFiniCeM, CiFiniCeV);
 
   Core::LinAlg::Matrix<3, 3> CeiFinTM(Core::LinAlg::Initialization::zero);
-  CeiFinTM.multiply_nn(1.0, CeM, iFinTM, 0.0);
-
-  Core::LinAlg::Matrix<3, 3> iCinCiCinM(Core::LinAlg::Initialization::zero);
-  temp3x3.multiply_nn(1.0, right_cg, iCinM, 0.0);
-  iCinCiCinM.multiply_nn(1.0, iCinM, temp3x3, 0.0);
   Core::LinAlg::Matrix<6, 1> iCinCiCinV(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCinCiCinM, iCinCiCinV);
-
-  Core::LinAlg::Matrix<3, 3> iCM(Core::LinAlg::Initialization::zero);
-  iCM.invert(right_cg);
   Core::LinAlg::Matrix<6, 1> iCV(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCM, iCV);
+  if (!local_jacobian_only)
+  {
+    CeiFinTM.multiply_nn(1.0, CeM, iFinTM, 0.0);
 
-  const auto S_T = make_matrix(get_full(ST.value));
+    Core::LinAlg::Matrix<3, 3> iCinCiCinM(Core::LinAlg::Initialization::zero);
+    temp3x3.multiply_nn(1.0, right_cg, iCinM, 0.0);
+    iCinCiCinM.multiply_nn(1.0, iCinM, temp3x3, 0.0);
+    Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCinCiCinM, iCinCiCinV);
+
+    Core::LinAlg::Matrix<3, 3> iCM(Core::LinAlg::Initialization::zero);
+    iCM.invert(right_cg);
+    Core::LinAlg::Voigt::Stresses::matrix_to_vector(iCM, iCV);
+  }
+
   // compute the relevant derivatives of the symmetric part of the Mandel stress
 
   /**
@@ -2328,12 +2417,15 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
   dMtheta_sym_diFin.multiply_nt(delta(4), const_non_mat_tensors.id6x1, CiFinCeV, 1.0);
   dMtheta_sym_diFin.multiply_nt(delta(5), const_non_mat_tensors.id6x1, CiFiniCeV, 1.0);
   // thermal contribution
-  temp_four_tensor.clear();
-  Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor_by_second_index<3>(
-      temp_four_tensor, S_T, dCediFin_FourTensor, true);
-  Core::LinAlg::Matrix<6, 9> dMT_sym_dFin{Core::LinAlg::Initialization::zero};
-  Core::LinAlg::Voigt::setup_6x9_voigt_matrix_from_four_tensor(dMT_sym_dFin, temp_four_tensor);
-  dMtheta_sym_diFin.update(-1.0, dMT_sym_dFin, 1.0);
+  if (thermal_stress)
+  {
+    temp_four_tensor.clear();
+    Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor_by_second_index<3>(
+        temp_four_tensor, S_T, dCediFin_FourTensor, true);
+    Core::LinAlg::Matrix<6, 9> dMT_sym_dFin{Core::LinAlg::Initialization::zero};
+    Core::LinAlg::Voigt::setup_6x9_voigt_matrix_from_four_tensor(dMT_sym_dFin, temp_four_tensor);
+    dMtheta_sym_diFin.update(-1.0, dMT_sym_dFin, 1.0);
+  }
 
   /**
    \f$ \frac{\partial \boldsymbol{M}_{\theta, \text{sym}} }{\partial
@@ -2343,63 +2435,68 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
    \boldsymbol{S}_{T}\right)\f$ (Voigt stress-stress form)
   */
   Core::LinAlg::Matrix<6, 6> dMtheta_sym_dC(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::FourTensorOperations::add_kronecker_tensor_product(
-      dMtheta_sym_dC, gamma(0), iFinTM, iFinTM, 0.0);
-  Core::LinAlg::FourTensorOperations::add_kronecker_tensor_product(
-      dMtheta_sym_dC, gamma(1), iFinTM, CeiFinTM, 1.0);
-  Core::LinAlg::FourTensorOperations::add_kronecker_tensor_product(
-      dMtheta_sym_dC, gamma(1), CeiFinTM, iFinTM, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(0) / 2.0, CeV, iCinV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(1) / 2.0, CeV, iCinCiCinV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(1) / 2.0, CeCeV, iCinV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(2) / 2.0, CeV, iCV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(2) / 2.0, const_non_mat_tensors.id6x1, iCinV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(3) / 2.0, CeCeV, iCinCiCinV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(4) / 2.0, CeCeV, iCV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(4) / 2.0, const_non_mat_tensors.id6x1, iCinCiCinV, 1.0);
-  dMtheta_sym_dC.multiply_nt(delta(5) / 2.0, const_non_mat_tensors.id6x1, iCV, 1.0);
-  // thermal contribution
-  Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor_by_second_index<3>(
-      temp_four_tensor, S_T, dCedC_FourTensor, true);
-  Core::LinAlg::Matrix<6, 6> dMT_sym_dC{Core::LinAlg::Initialization::zero};
-  Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(dMT_sym_dC, temp_four_tensor);
-  dMtheta_sym_dC.update(-1.0, dMT_sym_dC, 1.0);
+  if (!local_jacobian_only)
+  {
+    Core::LinAlg::FourTensorOperations::add_kronecker_tensor_product(
+        dMtheta_sym_dC, gamma(0), iFinTM, iFinTM, 0.0);
+    Core::LinAlg::FourTensorOperations::add_kronecker_tensor_product(
+        dMtheta_sym_dC, gamma(1), iFinTM, CeiFinTM, 1.0);
+    Core::LinAlg::FourTensorOperations::add_kronecker_tensor_product(
+        dMtheta_sym_dC, gamma(1), CeiFinTM, iFinTM, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(0) / 2.0, CeV, iCinV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(1) / 2.0, CeV, iCinCiCinV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(1) / 2.0, CeCeV, iCinV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(2) / 2.0, CeV, iCV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(2) / 2.0, const_non_mat_tensors.id6x1, iCinV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(3) / 2.0, CeCeV, iCinCiCinV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(4) / 2.0, CeCeV, iCV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(4) / 2.0, const_non_mat_tensors.id6x1, iCinCiCinV, 1.0);
+    dMtheta_sym_dC.multiply_nt(delta(5) / 2.0, const_non_mat_tensors.id6x1, iCV, 1.0);
+    if (thermal_stress)
+    {
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor_by_second_index<3>(
+          temp_four_tensor, S_T, dCedC_FourTensor, true);
+      Core::LinAlg::Matrix<6, 6> dMT_sym_dC{Core::LinAlg::Initialization::zero};
+      Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(dMT_sym_dC, temp_four_tensor);
+      dMtheta_sym_dC.update(-1.0, dMT_sym_dC, 1.0);
+    }
+  }
 
   /**
    \f$ \frac{\partial \boldsymbol{M}_{\theta, \text{sym}} }{\partial T}  =
    - \boldsymbol{C}_e \cdot \frac{\partial\boldsymbol{S}_{T}}{\partial T}\f$ (Voigt stress-form)
   */
-  const auto dST_dT_M = make_matrix(get_full(ST.temperature_derivative));
-  Core::LinAlg::Matrix<3, 3> dMtheta_sym_dT_M(Core::LinAlg::Initialization::zero);
-  dMtheta_sym_dT_M.multiply_nn(-1.0, CeM, dST_dT_M, 0.0);
   Core::LinAlg::Matrix<6, 1> dMtheta_sym_dT_V(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::Voigt::Stresses::matrix_to_vector(dMtheta_sym_dT_M, dMtheta_sym_dT_V);
+  if (!local_jacobian_only)
+  {
+    const auto dST_dT_M = make_matrix(get_full(ST.temperature_derivative));
+    Core::LinAlg::Matrix<3, 3> dMtheta_sym_dT_M(Core::LinAlg::Initialization::zero);
+    dMtheta_sym_dT_M.multiply_nn(-1.0, CeM, dST_dT_M, 0.0);
+    Core::LinAlg::Voigt::Stresses::matrix_to_vector(dMtheta_sym_dT_M, dMtheta_sym_dT_V);
+  }
 
-
-  // compute derivative of the additional transversely isotropic stress (w.r.t. right
-  // elastic Cauchy-Green deformation tensor) in stress-strain notation
-  temp6x6.update(1.0, dSedCe, 0.0);
-  Core::LinAlg::Matrix<6, 6> dSedCe_stress_strain =
-      Core::LinAlg::Voigt::modify_voigt_representation(temp6x6, 1.0, 2.0);
-
-  // \f$ \frac{\partial \boldsymbol{S}^{\text{e}}_{\text{trn}} }{\partial
-  // \boldsymbol{F}^{\text{in}^{-1}}_{}} \f$ (Voigt stress-form)
-  Core::LinAlg::Matrix<6, 9> dSediFin(Core::LinAlg::Initialization::zero);
-  dSediFin.multiply_nn(1.0, dSedCe_stress_strain, state_quantity_derivatives.curr_dCediFin, 0.0);
-  Core::LinAlg::FourTensor<3> dSediFin_FourTensor(true);
-  Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(dSediFin_FourTensor, dSediFin);
-
-  // \f$ \frac{\partial \boldsymbol{S}^{\text{e}}_{\text{trn}} }{\partial
-  // \boldsymbol{C}^{}_{}} \f$ (Voigt stress-stress form)
-  Core::LinAlg::Matrix<6, 6> dSedC(Core::LinAlg::Initialization::zero);
-  dSedC.multiply_nn(1.0, dSedCe_stress_strain, state_quantity_derivatives.curr_dCedC, 0.0);
-  Core::LinAlg::FourTensor<3> dSedC_FourTensor(true);
-  Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(dSedC_FourTensor, dSedC);
 
   // compute additional components of the elastic transversely isotropic components for the
   // derivatives of the symmetric Mandel stress
-  if (parameter()->mat_behavior() == ViscoplastUtils::MatBehavior::transv_isotropic)
+  if (transv_isotropic)
   {
+    temp6x6.update(1.0, dSedCe, 0.0);
+    Core::LinAlg::Matrix<6, 6> dSedCe_stress_strain =
+        Core::LinAlg::Voigt::modify_voigt_representation(temp6x6, 1.0, 2.0);
+
+    Core::LinAlg::Matrix<6, 9> dSediFin(Core::LinAlg::Initialization::zero);
+    dSediFin.multiply_nn(1.0, dSedCe_stress_strain, state_quantity_derivatives.curr_dCediFin, 0.0);
+    Core::LinAlg::FourTensor<3> dSediFin_FourTensor(true);
+    Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(dSediFin_FourTensor, dSediFin);
+
+    Core::LinAlg::FourTensor<3> dSedC_FourTensor(true);
+    if (!local_jacobian_only)
+    {
+      Core::LinAlg::Matrix<6, 6> dSedC(Core::LinAlg::Initialization::zero);
+      dSedC.multiply_nn(1.0, dSedCe_stress_strain, state_quantity_derivatives.curr_dCedC, 0.0);
+      Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(dSedC_FourTensor, dSedC);
+    }
+
     Core::LinAlg::FourTensor<3> CedSediFin_FourTensor(true);
     Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
         CedSediFin_FourTensor, CeM, dSediFin_FourTensor, true);
@@ -2421,24 +2518,27 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
         temp6x9, SedCediFin_T12_FourTensor);
     dMtheta_sym_diFin.update(1.0 / 2.0, temp6x9, 1.0);
 
-    Core::LinAlg::FourTensor<3> CedSedC_FourTensor(true);
-    Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
-        CedSedC_FourTensor, CeM, dSedC_FourTensor, true);
-    Core::LinAlg::FourTensor<3> CedSedC_T12_FourTensor(true);
-    CedSedC_T12_FourTensor.transpose_12(CedSedC_FourTensor);
-    Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, CedSedC_FourTensor);
-    dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
-    Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, CedSedC_T12_FourTensor);
-    dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
-    Core::LinAlg::FourTensor<3> SedCedC_FourTensor(true);
-    Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
-        SedCedC_FourTensor, SeM, dCedC_FourTensor, true);
-    Core::LinAlg::FourTensor<3> SedCedC_T12_FourTensor(true);
-    SedCedC_T12_FourTensor.transpose_12(SedCedC_FourTensor);
-    Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, SedCedC_FourTensor);
-    dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
-    Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, SedCedC_T12_FourTensor);
-    dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
+    if (!local_jacobian_only)
+    {
+      Core::LinAlg::FourTensor<3> CedSedC_FourTensor(true);
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+          CedSedC_FourTensor, CeM, dSedC_FourTensor, true);
+      Core::LinAlg::FourTensor<3> CedSedC_T12_FourTensor(true);
+      CedSedC_T12_FourTensor.transpose_12(CedSedC_FourTensor);
+      Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, CedSedC_FourTensor);
+      dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
+      Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, CedSedC_T12_FourTensor);
+      dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
+      Core::LinAlg::FourTensor<3> SedCedC_FourTensor(true);
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+          SedCedC_FourTensor, SeM, dCedC_FourTensor, true);
+      Core::LinAlg::FourTensor<3> SedCedC_T12_FourTensor(true);
+      SedCedC_T12_FourTensor.transpose_12(SedCedC_FourTensor);
+      Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, SedCedC_FourTensor);
+      dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
+      Core::LinAlg::Voigt::setup_6x6_voigt_matrix_from_four_tensor(temp6x6, SedCedC_T12_FourTensor);
+      dMtheta_sym_dC.update(1.0 / 2.0, temp6x6, 1.0);
+    }
   }
 
   // compute derivatives of the deviatoric, symmetric part of the Mandel stress
@@ -2453,14 +2553,16 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
   \f$ \frac{\partial \boldsymbol{M}^{\theta}_{\text{dev,sym}} }{\partial
   \boldsymbol{C}^{}_{}} \f$ (Voigt stress-stress form)
   */
-  state_quantity_derivatives.curr_dMtheta_dev_sym_dC.multiply_nn(
-      1.0, const_non_mat_tensors.dev_op, dMtheta_sym_dC, 0.0);
+  if (!local_jacobian_only)
+    state_quantity_derivatives.curr_dMtheta_dev_sym_dC.multiply_nn(
+        1.0, const_non_mat_tensors.dev_op, dMtheta_sym_dC, 0.0);
   /**
   \f$ \frac{\partial \boldsymbol{M}^{\theta}_{\text{dev,sym}} }{\partial
   T} \f$ (Voigt stress form)
   */
-  state_quantity_derivatives.curr_dMtheta_dev_sym_dT.multiply_nn(
-      1.0, const_non_mat_tensors.dev_op, dMtheta_sym_dT_V, 0.0);
+  if (!local_jacobian_only)
+    state_quantity_derivatives.curr_dMtheta_dev_sym_dT.multiply_nn(
+        1.0, const_non_mat_tensors.dev_op, dMtheta_sym_dT_V, 0.0);
 
   // plastic flow direction in Voigt strain notation
   Core::LinAlg::Matrix<6, 1> NpVstrainform(Core::LinAlg::Initialization::zero);
@@ -2474,13 +2576,15 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
       1.0, NpVstrainform, state_quantity_derivatives.curr_dMtheta_dev_sym_diFin, 0.0);
   /// \f$ \frac{\partial \overline{\sigma} }{\partial
   /// \boldsymbol{C}^{}} \f$ (Voigt stress-form)
-  state_quantity_derivatives.curr_dequiv_stress_dC.multiply_tn(
-      1.0, NpVstrainform, state_quantity_derivatives.curr_dMtheta_dev_sym_dC, 0.0);
-  /// \f$ \frac{\partial \overline{\sigma} }{\partial
-  /// T} \f$
-  Core::LinAlg::Matrix<1, 1> temp1x1{Core::LinAlg::Initialization::zero};
-  temp1x1.multiply_tn(1.0, NpVstrainform, state_quantity_derivatives.curr_dMtheta_dev_sym_dT, 0.0);
-  state_quantity_derivatives.curr_dequiv_stress_dT = temp1x1(0);
+  if (!local_jacobian_only)
+  {
+    state_quantity_derivatives.curr_dequiv_stress_dC.multiply_tn(
+        1.0, NpVstrainform, state_quantity_derivatives.curr_dMtheta_dev_sym_dC, 0.0);
+    Core::LinAlg::Matrix<1, 1> temp1x1{Core::LinAlg::Initialization::zero};
+    temp1x1.multiply_tn(
+        1.0, NpVstrainform, state_quantity_derivatives.curr_dMtheta_dev_sym_dT, 0.0);
+    state_quantity_derivatives.curr_dequiv_stress_dT = temp1x1(0);
+  }
 
 
 
@@ -2559,90 +2663,87 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
   temp6x6 = dNpdMtheta_sym_dev;
   dNpdMtheta_sym_dev = Core::LinAlg::Voigt::modify_voigt_representation(temp6x6, 1.0, 2.0);
 
-  Core::LinAlg::Matrix<6, 6> Np_dyad_Np_V(
-      Core::LinAlg::Initialization::zero);  // in stress-strain form
-  Np_dyad_Np_V.multiply_nt(1.0, NpVstressform, NpVstrainform, 0.0);
-  temp6x6.update(state_quantity_derivatives.curr_dpsr_dequiv_stress, Np_dyad_Np_V,
-      equiv_plastic_strain_rate, dNpdMtheta_sym_dev, 0.0);
+  if (need_plastic_velocity_gradient_derivs)
+  {
+    Core::LinAlg::Matrix<6, 6> Np_dyad_Np_V(Core::LinAlg::Initialization::zero);
+    Np_dyad_Np_V.multiply_nt(1.0, NpVstressform, NpVstrainform, 0.0);
+    temp6x6.update(state_quantity_derivatives.curr_dpsr_dequiv_stress, Np_dyad_Np_V,
+        equiv_plastic_strain_rate, dNpdMtheta_sym_dev, 0.0);
 
-  /** Now: \f[ \texttt{temp6x6} = \frac{\partial \boldsymbol{D}_p}{\partial
-  \boldsymbol{M}_{\theta,\text{symm, dev}}} =
-  \frac{\partial\dot{\varepsilon}_p}{\partial\sigma_\text{eq}}
-  \boldsymbol{N}_p \otimes \boldsymbol{N}_p + \dot{\varepsilon}_p \frac{\partial
-  \boldsymbol{N}_p}{\boldsymbol{M}_{\theta,\text{symm, dev}}}\f]
-  (in stress-strain form)
-  */
 
-  // compute derivatives of the plastic stretching tensor...
-  // ... w.r.t. invese inelastic defgrad
-  state_quantity_derivatives.curr_ddpdiFin.multiply_nn(
-      1.0, temp6x6, state_quantity_derivatives.curr_dMtheta_dev_sym_diFin, 0.0);
-  // ... w.r.t. plastic strain
-  state_quantity_derivatives.curr_ddpdepsp.update(
-      state_quantity_derivatives.curr_dpsr_depsp, NpVstressform, 0.0);
-  // ... w.r.t. right CG
-  state_quantity_derivatives.curr_ddpdC.multiply_nn(
-      1.0, temp6x6, state_quantity_derivatives.curr_dMtheta_dev_sym_dC, 0.0);
-  // ... w.r.t. temperature
-  state_quantity_derivatives.curr_ddpdT.multiply_nn(
-      1.0, temp6x6, state_quantity_derivatives.curr_dMtheta_dev_sym_dT, 0.0);
-  state_quantity_derivatives.curr_ddpdT.update(
-      state_quantity_derivatives.curr_dpsr_dT, NpVstressform, 1.0);
+    state_quantity_derivatives.curr_ddpdiFin.multiply_nn(
+        1.0, temp6x6, state_quantity_derivatives.curr_dMtheta_dev_sym_diFin, 0.0);
+    state_quantity_derivatives.curr_ddpdepsp.update(
+        state_quantity_derivatives.curr_dpsr_depsp, NpVstressform, 0.0);
+    if (!local_jacobian_only)
+    {
+      state_quantity_derivatives.curr_ddpdC.multiply_nn(
+          1.0, temp6x6, state_quantity_derivatives.curr_dMtheta_dev_sym_dC, 0.0);
+      state_quantity_derivatives.curr_ddpdT.multiply_nn(
+          1.0, temp6x6, state_quantity_derivatives.curr_dMtheta_dev_sym_dT, 0.0);
+      state_quantity_derivatives.curr_ddpdT.update(
+          state_quantity_derivatives.curr_dpsr_dT, NpVstressform, 1.0);
+    }
 
-  // compute derivatives of the plastic velocity gradient ...
 
-  // ... w.r.t. invese inelastic defgrad
-  Core::LinAlg::FourTensor<3> ddpdiFin_FourTensor(true);
-  Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(
-      ddpdiFin_FourTensor, state_quantity_derivatives.curr_ddpdiFin);
-  Core::LinAlg::FourTensor<3> id_plus_mm_ddpdiFin_FourTensor(true);
-  Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
-      id_plus_mm_ddpdiFin_FourTensor, const_mat_tensors_.id_plus_mm, ddpdiFin_FourTensor, true);
-  Core::LinAlg::Voigt::setup_9x9_voigt_matrix_from_four_tensor(
-      temp9x9, id_plus_mm_ddpdiFin_FourTensor);
-  state_quantity_derivatives.curr_dlpdiFin.update(1.0, temp9x9, 0.0);
-  Core::LinAlg::FourTensor<3> mm_ddpdiFin_FourTensor(true);
-  Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
-      mm_ddpdiFin_FourTensor, const_mat_tensors_.mm, ddpdiFin_FourTensor, true);
-  Core::LinAlg::FourTensor<3> mm_ddpdiFin_T12_FourTensor(true);
-  mm_ddpdiFin_T12_FourTensor.transpose_12(mm_ddpdiFin_FourTensor);
-  Core::LinAlg::Voigt::setup_9x9_voigt_matrix_from_four_tensor(temp9x9, mm_ddpdiFin_T12_FourTensor);
-  state_quantity_derivatives.curr_dlpdiFin.update(-1.0, temp9x9, 1.0);
+    Core::LinAlg::FourTensor<3> ddpdiFin_FourTensor(true);
+    Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(
+        ddpdiFin_FourTensor, state_quantity_derivatives.curr_ddpdiFin);
+    Core::LinAlg::FourTensor<3> id_plus_mm_ddpdiFin_FourTensor(true);
+    Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+        id_plus_mm_ddpdiFin_FourTensor, const_mat_tensors_.id_plus_mm, ddpdiFin_FourTensor, true);
+    Core::LinAlg::Voigt::setup_9x9_voigt_matrix_from_four_tensor(
+        temp9x9, id_plus_mm_ddpdiFin_FourTensor);
+    state_quantity_derivatives.curr_dlpdiFin.update(1.0, temp9x9, 0.0);
+    Core::LinAlg::FourTensor<3> mm_ddpdiFin_FourTensor(true);
+    Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+        mm_ddpdiFin_FourTensor, const_mat_tensors_.mm, ddpdiFin_FourTensor, true);
+    Core::LinAlg::FourTensor<3> mm_ddpdiFin_T12_FourTensor(true);
+    mm_ddpdiFin_T12_FourTensor.transpose_12(mm_ddpdiFin_FourTensor);
+    Core::LinAlg::Voigt::setup_9x9_voigt_matrix_from_four_tensor(
+        temp9x9, mm_ddpdiFin_T12_FourTensor);
+    state_quantity_derivatives.curr_dlpdiFin.update(-1.0, temp9x9, 1.0);
 
-  // ... w.r.t. right CG
-  Core::LinAlg::FourTensor<3> ddpdC_FourTensor(true);
-  Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(
-      ddpdC_FourTensor, state_quantity_derivatives.curr_ddpdC);
-  Core::LinAlg::FourTensor<3> id_plus_mm_ddpdC_FourTensor(true);
-  Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
-      id_plus_mm_ddpdC_FourTensor, const_mat_tensors_.id_plus_mm, ddpdC_FourTensor, true);
-  Core::LinAlg::Voigt::setup_9x6_voigt_matrix_from_four_tensor(
-      temp9x6, id_plus_mm_ddpdC_FourTensor);
-  state_quantity_derivatives.curr_dlpdC.update(1.0, temp9x6, 0.0);
-  Core::LinAlg::FourTensor<3> mm_ddpdC_FourTensor(true);
-  Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
-      mm_ddpdC_FourTensor, const_mat_tensors_.mm, ddpdC_FourTensor, true);
-  Core::LinAlg::FourTensor<3> mm_ddpdC_T12_FourTensor(true);
-  mm_ddpdC_T12_FourTensor.transpose_12(mm_ddpdC_FourTensor);
-  Core::LinAlg::Voigt::setup_9x6_voigt_matrix_from_four_tensor(temp9x6, mm_ddpdC_T12_FourTensor);
-  state_quantity_derivatives.curr_dlpdC.update(-1.0, temp9x6, 1.0);
+    if (!local_jacobian_only)
+    {
+      Core::LinAlg::FourTensor<3> ddpdC_FourTensor(true);
+      Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(
+          ddpdC_FourTensor, state_quantity_derivatives.curr_ddpdC);
+      Core::LinAlg::FourTensor<3> id_plus_mm_ddpdC_FourTensor(true);
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+          id_plus_mm_ddpdC_FourTensor, const_mat_tensors_.id_plus_mm, ddpdC_FourTensor, true);
+      Core::LinAlg::Voigt::setup_9x6_voigt_matrix_from_four_tensor(
+          temp9x6, id_plus_mm_ddpdC_FourTensor);
+      state_quantity_derivatives.curr_dlpdC.update(1.0, temp9x6, 0.0);
+      Core::LinAlg::FourTensor<3> mm_ddpdC_FourTensor(true);
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+          mm_ddpdC_FourTensor, const_mat_tensors_.mm, ddpdC_FourTensor, true);
+      Core::LinAlg::FourTensor<3> mm_ddpdC_T12_FourTensor(true);
+      mm_ddpdC_T12_FourTensor.transpose_12(mm_ddpdC_FourTensor);
+      Core::LinAlg::Voigt::setup_9x6_voigt_matrix_from_four_tensor(
+          temp9x6, mm_ddpdC_T12_FourTensor);
+      state_quantity_derivatives.curr_dlpdC.update(-1.0, temp9x6, 1.0);
+    }
 
-  // ... w.r.t. plastic strain
-  Core::LinAlg::Matrix<3, 3> ddpdepsp_M(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::Voigt::Stresses::vector_to_matrix(
-      state_quantity_derivatives.curr_ddpdepsp, ddpdepsp_M);
-  Core::LinAlg::Matrix<3, 3> dlpdepsp_M(Core::LinAlg::Initialization::zero);
-  dlpdepsp_M.multiply_nn(1.0, const_mat_tensors_.id_plus_mm, ddpdepsp_M, 0.0);
-  dlpdepsp_M.multiply_nn(-1.0, ddpdepsp_M, const_mat_tensors_.mm, 1.0);
-  Core::LinAlg::Voigt::matrix_3x3_to_9x1(dlpdepsp_M, state_quantity_derivatives.curr_dlpdepsp);
+    Core::LinAlg::Matrix<3, 3> ddpdepsp_M(Core::LinAlg::Initialization::zero);
+    Core::LinAlg::Voigt::Stresses::vector_to_matrix(
+        state_quantity_derivatives.curr_ddpdepsp, ddpdepsp_M);
+    Core::LinAlg::Matrix<3, 3> dlpdepsp_M(Core::LinAlg::Initialization::zero);
+    dlpdepsp_M.multiply_nn(1.0, const_mat_tensors_.id_plus_mm, ddpdepsp_M, 0.0);
+    dlpdepsp_M.multiply_nn(-1.0, ddpdepsp_M, const_mat_tensors_.mm, 1.0);
+    Core::LinAlg::Voigt::matrix_3x3_to_9x1(dlpdepsp_M, state_quantity_derivatives.curr_dlpdepsp);
 
-  // ... w.r.t. temperature
-  Core::LinAlg::Matrix<3, 3> ddpdT_M(Core::LinAlg::Initialization::zero);
-  Core::LinAlg::Voigt::Stresses::vector_to_matrix(state_quantity_derivatives.curr_ddpdT, ddpdT_M);
-  Core::LinAlg::Matrix<3, 3> dlpdT_M(Core::LinAlg::Initialization::zero);
-  dlpdT_M.multiply_nn(1.0, const_mat_tensors_.id_plus_mm, ddpdT_M, 0.0);
-  dlpdT_M.multiply_nn(-1.0, ddpdT_M, const_mat_tensors_.mm, 1.0);
-  Core::LinAlg::Voigt::matrix_3x3_to_9x1(dlpdT_M, state_quantity_derivatives.curr_dlpdT);
+    if (!local_jacobian_only)
+    {
+      Core::LinAlg::Matrix<3, 3> ddpdT_M(Core::LinAlg::Initialization::zero);
+      Core::LinAlg::Voigt::Stresses::vector_to_matrix(
+          state_quantity_derivatives.curr_ddpdT, ddpdT_M);
+      Core::LinAlg::Matrix<3, 3> dlpdT_M(Core::LinAlg::Initialization::zero);
+      dlpdT_M.multiply_nn(1.0, const_mat_tensors_.id_plus_mm, ddpdT_M, 0.0);
+      dlpdT_M.multiply_nn(-1.0, ddpdT_M, const_mat_tensors_.mm, 1.0);
+      Core::LinAlg::Voigt::matrix_3x3_to_9x1(dlpdT_M, state_quantity_derivatives.curr_dlpdT);
+    }
+  }
 
   // compute derivatives of the update tensor (only required for standard substepping)
   if (parameter()->timint_type() == ViscoplastUtils::TimIntType::standard)
@@ -2667,23 +2768,72 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_state_quantity_deriv
     state_quantity_derivatives.curr_dEpdiFin.multiply_nn(
         -step, expderivV, state_quantity_derivatives.curr_dlpdiFin, 0.0);
 
-    // ... w.r.t. right CG
-    state_quantity_derivatives.curr_dEpdC.multiply_nn(
-        -step, expderivV, state_quantity_derivatives.curr_dlpdC, 0.0);
+    if (!local_jacobian_only)
+    {
+      state_quantity_derivatives.curr_dEpdC.multiply_nn(
+          -step, expderivV, state_quantity_derivatives.curr_dlpdC, 0.0);
+    }
 
     // ... w.r.t. plastic strain
     state_quantity_derivatives.curr_dEpdepsp.multiply_nn(
         -step, expderivV, state_quantity_derivatives.curr_dlpdepsp, 0.0);
 
-    // ... w.r.t. temperature
-    state_quantity_derivatives.curr_dEpdT.multiply_nn(
-        -step, expderivV, state_quantity_derivatives.curr_dlpdT, 0.0);
+    if (!local_jacobian_only)
+    {
+      state_quantity_derivatives.curr_dEpdT.multiply_nn(
+          -step, expderivV, state_quantity_derivatives.curr_dlpdT, 0.0);
+    }
 
     return state_quantity_derivatives;
   }
   if (parameter()->timint_type() == ViscoplastUtils::TimIntType::logarithmic)
   {
-    // nothing else to be done for logarithmic time integration
+    if (use_rate_eliminated_and_inverse_flow_rule_residual())
+    {
+      Core::LinAlg::Matrix<6, 9> dNpdiFin(Core::LinAlg::Initialization::zero);
+      dNpdiFin.multiply_nn(
+          1.0, dNpdMtheta_sym_dev, state_quantity_derivatives.curr_dMtheta_dev_sym_diFin, 0.0);
+      Core::LinAlg::FourTensor<3> dNpdiFin_FourTensor(true);
+      Core::LinAlg::Voigt::setup_four_tensor_from_6x9_voigt_matrix(dNpdiFin_FourTensor, dNpdiFin);
+      Core::LinAlg::FourTensor<3> id_plus_mm_dNpdiFin_FourTensor(true);
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+          id_plus_mm_dNpdiFin_FourTensor, const_mat_tensors_.id_plus_mm, dNpdiFin_FourTensor, true);
+      Core::LinAlg::Voigt::setup_9x9_voigt_matrix_from_four_tensor(
+          temp9x9, id_plus_mm_dNpdiFin_FourTensor);
+      state_quantity_derivatives.curr_dlp_direction_diFin.update(1.0, temp9x9, 0.0);
+      Core::LinAlg::FourTensor<3> mm_dNpdiFin_FourTensor(true);
+      Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+          mm_dNpdiFin_FourTensor, const_mat_tensors_.mm, dNpdiFin_FourTensor, true);
+      Core::LinAlg::FourTensor<3> mm_dNpdiFin_T12_FourTensor(true);
+      mm_dNpdiFin_T12_FourTensor.transpose_12(mm_dNpdiFin_FourTensor);
+      Core::LinAlg::Voigt::setup_9x9_voigt_matrix_from_four_tensor(
+          temp9x9, mm_dNpdiFin_T12_FourTensor);
+      state_quantity_derivatives.curr_dlp_direction_diFin.update(-1.0, temp9x9, 1.0);
+
+      if (!local_jacobian_only)
+      {
+        Core::LinAlg::Matrix<6, 6> dNpdC(Core::LinAlg::Initialization::zero);
+        dNpdC.multiply_nn(
+            1.0, dNpdMtheta_sym_dev, state_quantity_derivatives.curr_dMtheta_dev_sym_dC, 0.0);
+        Core::LinAlg::FourTensor<3> dNpdC_FourTensor(true);
+        Core::LinAlg::Voigt::setup_four_tensor_from_6x6_voigt_matrix(dNpdC_FourTensor, dNpdC);
+        Core::LinAlg::FourTensor<3> id_plus_mm_dNpdC_FourTensor(true);
+        Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+            id_plus_mm_dNpdC_FourTensor, const_mat_tensors_.id_plus_mm, dNpdC_FourTensor, true);
+        Core::LinAlg::Voigt::setup_9x6_voigt_matrix_from_four_tensor(
+            temp9x6, id_plus_mm_dNpdC_FourTensor);
+        state_quantity_derivatives.curr_dlp_direction_dC.update(1.0, temp9x6, 0.0);
+        Core::LinAlg::FourTensor<3> mm_dNpdC_FourTensor(true);
+        Core::LinAlg::FourTensorOperations::multiply_matrix_four_tensor<3>(
+            mm_dNpdC_FourTensor, const_mat_tensors_.mm, dNpdC_FourTensor, true);
+        Core::LinAlg::FourTensor<3> mm_dNpdC_T12_FourTensor(true);
+        mm_dNpdC_T12_FourTensor.transpose_12(mm_dNpdC_FourTensor);
+        Core::LinAlg::Voigt::setup_9x6_voigt_matrix_from_four_tensor(
+            temp9x6, mm_dNpdC_T12_FourTensor);
+        state_quantity_derivatives.curr_dlp_direction_dC.update(-1.0, temp9x6, 1.0);
+      }
+    }
+
     return state_quantity_derivatives;
   }
 
@@ -2788,6 +2938,13 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_history_variables_wr
     else if (parameter()->timint_type() == ViscoplastUtils::TimIntType::logarithmic)
     // logarithmic substepping
     {
+      if (use_rate_eliminated_and_inverse_flow_rule_residual())
+      {
+        FOUR_C_THROW(
+            "Off-diagonal (temperature) stiffness not implemented for "
+            "LOCAL_NEWTON/USE_RATE_ELIMINATED_AND_INVERSE_FLOW_RULE_RESIDUAL!");
+      }
+
       // calculate RHS of the equation for the plastic deformation gradient
       rhs_iFin_V.update(-time_step_tracker_.dt, state_quantity_derivatives_.curr_dlpdT, 0.0);
 
@@ -3127,11 +3284,43 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_history_variables_wr
     // logarithmic substepping
     {
       // calculate RHS of the equation for the plastic deformation gradient
-      rhs_iFin_V.update(-time_step_tracker_.dt, state_quantity_derivatives_.curr_dlpdC, 0.0);
+      if (use_rate_eliminated_and_inverse_flow_rule_residual())
+      {
+        const double plastic_strain_increment = time_step_quantities_.current_plastic_strain[gp_] -
+                                                time_step_quantities_.last_plastic_strain[gp_];
+        rhs_iFin_V.update(
+            -plastic_strain_increment, state_quantity_derivatives_.curr_dlp_direction_dC, 0.0);
+      }
+      else
+      {
+        rhs_iFin_V.update(-time_step_tracker_.dt, state_quantity_derivatives_.curr_dlpdC, 0.0);
+      }
 
       // calculate RHS of the equation for the plastic strain
-      rhs_epsp_V.update(time_step_tracker_.dt * state_quantity_derivatives_.curr_dpsr_dequiv_stress,
-          state_quantity_derivatives_.curr_dequiv_stress_dC, 0.0);
+      if (use_rate_eliminated_and_inverse_flow_rule_residual())
+      {
+        auto inverse_flow_rule_err_status = ViscoplastUtils::ErrorType::no_errors;
+        const Mat::Viscoplastic::InverseFlowRuleResidual inverse_flow_rule =
+            viscoplastic_law_->evaluate_inverse_flow_rule_residual(
+                state_quantities_.curr_equiv_stress,
+                time_step_quantities_.current_plastic_strain[gp_],
+                time_step_quantities_.current_plastic_strain[gp_] -
+                    time_step_quantities_.last_plastic_strain[gp_],
+                time_step_tracker_.dt, elastic_youngs_modulus(), inverse_flow_rule_err_status);
+        if (inverse_flow_rule_err_status != ViscoplastUtils::ErrorType::no_errors)
+        {
+          err_status = inverse_flow_rule_err_status;
+          return {};
+        }
+        rhs_epsp_V.update(-inverse_flow_rule.deriv_equiv_stress,
+            state_quantity_derivatives_.curr_dequiv_stress_dC, 0.0);
+      }
+      else
+      {
+        rhs_epsp_V.update(
+            time_step_tracker_.dt * state_quantity_derivatives_.curr_dpsr_dequiv_stress,
+            state_quantity_derivatives_.curr_dequiv_stress_dC, 0.0);
+      }
     }
     else
     {
@@ -3464,13 +3653,9 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_residua
                                                              // scaling and squaring
                                                              // method
     {
-      // when computing the matrix logarithm with the inverse scaling
-      // and squaring, we also save the resulting Pade
-      // order via the dedicated pointer. This will be helpful when we
-      // compute the derivative - we want consistent Pade orders for the
-      // evaluations of functions and their derivatives.
+      unsigned int pade_order = 0;
       logT = Core::LinAlg::matrix_log(
-          T, log_err_status, matrix_exp_log_utils_.pade_order, parameter()->mat_log_calc_method());
+          T, log_err_status, pade_order, parameter()->mat_log_calc_method());
     }
     else  // evaluation using other provided methods
     {
@@ -3482,12 +3667,34 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_residua
       return Core::LinAlg::Matrix<10, 1>{Core::LinAlg::Initialization::zero};
     }
 
-    // calculate residual of the equation for inelastic defgrad
-    resFM.update(1.0, logT, step, state_quantities_.curr_lpM, 0.0);
+    if (use_rate_eliminated_and_inverse_flow_rule_residual())
+    {
+      const double plastic_strain_increment = plastic_strain - last_plastic_strain;
 
-    // calculate residual of the equation for plastic strain
-    resepsp = plastic_strain - last_plastic_strain -
-              step * state_quantities_.curr_equiv_plastic_strain_rate;
+      resFM.update(1.0, logT, plastic_strain_increment, state_quantities_.curr_lp_directionM, 0.0);
+
+      if (err_status == ViscoplastUtils::ErrorType::no_errors)
+      {
+        auto inverse_flow_rule_err_status = ViscoplastUtils::ErrorType::no_errors;
+        resepsp = viscoplastic_law_
+                      ->evaluate_inverse_flow_rule_residual(state_quantities_.curr_equiv_stress,
+                          plastic_strain, plastic_strain_increment, step, elastic_youngs_modulus(),
+                          inverse_flow_rule_err_status)
+                      .value;
+        if (inverse_flow_rule_err_status != ViscoplastUtils::ErrorType::no_errors)
+        {
+          err_status = inverse_flow_rule_err_status;
+          return Core::LinAlg::Matrix<10, 1>{Core::LinAlg::Initialization::zero};
+        }
+      }
+    }
+    else
+    {
+      resFM.update(1.0, logT, step, state_quantities_.curr_lpM, 0.0);
+
+      resepsp = plastic_strain - last_plastic_strain -
+                step * state_quantities_.curr_equiv_plastic_strain_rate;
+    }
   }
   else
   {
@@ -3519,7 +3726,9 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_jacobia
     const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
         local_integration_input,
     const Core::LinAlg::Matrix<10, 1>& x,
-    InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status)
+    InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status,
+    const InelasticDefgradTransvIsotropElastViscoplastUtils::StateQuantityDerivEvalType
+        deriv_eval_type)
 {
   ensure_error_free_evaluation(err_status);
 
@@ -3539,10 +3748,7 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_jacobia
 
   // evaluate state derivatives
   state_quantity_derivatives_ = evaluate_state_quantity_derivatives(local_integration_input, iFinM,
-      plastic_strain, err_status, ViscoplastUtils::StateQuantityDerivEvalType::full_eval,
-      state_quantities_);  // we do not reevaluate the state
-                           // quantities, this was done in the
-                           // residual computation already
+      plastic_strain, err_status, deriv_eval_type, state_quantities_);
 
   // get derivative of update tensor wrt inverse inelastic defgrad (in FourTensor form)
   Core::LinAlg::FourTensor<3> dEpdiFin_FourTensor(true);
@@ -3605,16 +3811,11 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_jacobia
                 pade_part_fract))  // evaluation using the Pade partial fraction
                                    // expansion?...
     {
-      // check whether the logarithm was evaluated with the inverse
-      // scaling and squaring method, for which we have also determined
-      // a suitable Pade order -> if not so, then we throw error, since
-      // this is the only implemented case for now!
       FOUR_C_ASSERT_ALWAYS(
           parameter()->mat_log_calc_method() == Core::LinAlg::MatrixLogCalcMethod::inv_scal_square,
           "Combination of logarithm evaluation methods not implemented yet!");
 
-      dlogTdT = Core::LinAlg::matrix_3x3_log_1st_deriv(T, log_err_status,
-          matrix_exp_log_utils_.pade_order, parameter()->mat_log_deriv_calc_method());
+      dlogTdT = Core::LinAlg::matrix_3x3_log_1st_deriv_inv_scal_square(T, log_err_status);
     }
     else  // evaluation using other provided methods?...
     {
@@ -3632,20 +3833,42 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::evaluate_local_newton_jacobia
         1.0, last_FinM, const_non_mat_tensors.id3x3, dTdiFin);
     Core::LinAlg::Matrix<9, 9> dlogTdiFin(Core::LinAlg::Initialization::zero);
     dlogTdiFin.multiply_nn(1.0, dlogTdT, dTdiFin, 0.0);
-    J_iFin_iFin.update(1.0, dlogTdiFin, step, state_quantity_derivatives_.curr_dlpdiFin, 0.0);
+    if (use_rate_eliminated_and_inverse_flow_rule_residual())
+    {
+      if (err_status != ViscoplastUtils::ErrorType::no_errors)
+        return Core::LinAlg::Matrix<10, 10>{Core::LinAlg::Initialization::zero};
+      const double plastic_strain_increment =
+          plastic_strain - local_integration_input.last_plastic_strain;
 
-    // compute 9x1 north-east component block of the Jacobian (derivative of residual for
-    // inelastic deformation gradient w.r.t. plastic strain)
-    J_iFin_epsp.update(step, state_quantity_derivatives_.curr_dlpdepsp, 0.0);
+      J_iFin_iFin.update(1.0, dlogTdiFin, plastic_strain_increment,
+          state_quantity_derivatives_.curr_dlp_direction_diFin, 0.0);
+      Core::LinAlg::Voigt::matrix_3x3_to_9x1(state_quantities_.curr_lp_directionM, J_iFin_epsp);
 
-    // compute 1x9 south-west component block of the Jacobian (derivative of residual for
-    // plastic strain w.r.t. inelastic deformation gradient)
-    J_epsp_iFin.update(-step * state_quantity_derivatives_.curr_dpsr_dequiv_stress,
-        state_quantity_derivatives_.curr_dequiv_stress_diFin, 0.0);
+      auto inverse_flow_rule_err_status = ViscoplastUtils::ErrorType::no_errors;
+      const Mat::Viscoplastic::InverseFlowRuleResidual inverse_flow_rule =
+          viscoplastic_law_->evaluate_inverse_flow_rule_residual(
+              state_quantities_.curr_equiv_stress, plastic_strain, plastic_strain_increment, step,
+              elastic_youngs_modulus(), inverse_flow_rule_err_status);
+      if (inverse_flow_rule_err_status != ViscoplastUtils::ErrorType::no_errors)
+      {
+        err_status = inverse_flow_rule_err_status;
+        return Core::LinAlg::Matrix<10, 10>{Core::LinAlg::Initialization::zero};
+      }
+      J_epsp_iFin.update(inverse_flow_rule.deriv_equiv_stress,
+          state_quantity_derivatives_.curr_dequiv_stress_diFin, 0.0);
+      J_epsp_epsp = inverse_flow_rule.deriv_plastic_strain;
+    }
+    else
+    {
+      J_iFin_iFin.update(1.0, dlogTdiFin, step, state_quantity_derivatives_.curr_dlpdiFin, 0.0);
 
-    // compute south-east component of the Jacobian (derivative of residual for plastic
-    // strain w.r.t. plastic strain)
-    J_epsp_epsp = 1.0 - step * state_quantity_derivatives_.curr_dpsr_depsp;
+      J_iFin_epsp.update(step, state_quantity_derivatives_.curr_dlpdepsp, 0.0);
+
+      J_epsp_iFin.update(-step * state_quantity_derivatives_.curr_dpsr_dequiv_stress,
+          state_quantity_derivatives_.curr_dequiv_stress_diFin, 0.0);
+
+      J_epsp_epsp = 1.0 - step * state_quantity_derivatives_.curr_dpsr_depsp;
+    }
   }
   else
   {
@@ -3790,8 +4013,11 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::local_newton_loop(
   ViscoplastUtils::EvaluationAction eval_action{
       ViscoplastUtils::EvaluationAction::continue_current_iteration};
 
+  std::optional<Core::LinAlg::Matrix<10, 1>> reusable_residual;
+
   // initialize local Newton
   local_newton_manager_.reset_iter();
+  if (line_search_) line_search_->reset();
   std::optional<Core::LinAlg::Matrix<10, 1>> init_estimate =
       determine_local_newton_init_estimate(local_integration_input);
   if (init_estimate)
@@ -3822,37 +4048,39 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::local_newton_loop(
     // set error status to no_errors
     err_status = ViscoplastUtils::ErrorType::no_errors;
 
-    // evaluate residual
-    residual = evaluate_local_newton_residual(
-        local_integration_input, local_newton_manager_.sol(), err_status);
-
-    // error management after residual evaluation
-    eval_action = manage_evaluation(err_status, local_integration_input);
-    switch (eval_action)
+    if (reusable_residual)
     {
-      case (ViscoplastUtils::EvaluationAction::continue_current_iteration):
+      residual = *reusable_residual;
+      reusable_residual.reset();
+    }
+    else
+    {
+      residual = evaluate_local_newton_residual(
+          local_integration_input, local_newton_manager_.sol(), err_status);
+
+      eval_action = manage_evaluation(err_status, local_integration_input);
+      switch (eval_action)
       {
-        // continue evaluation
-        break;
-      }
-      case (ViscoplastUtils::EvaluationAction::continue_with_next_iteration):
-      {
-        // proceed with next iteration after performing adjustments due
-        // to errors
-        local_newton_manager_.increment_iter();
-        continue;
-      }
-      case (ViscoplastUtils::EvaluationAction::exit_with_error):
-      {
-        // exit with empty solution vector
-        return std::nullopt;
-      }
-      default:
-      {
-        FOUR_C_THROW(
-            "{}", get_error_warning_info(std::format(
-                      "Invalid evaluation action {} for error status {} after residual evaluation",
-                      EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+        case (ViscoplastUtils::EvaluationAction::continue_current_iteration):
+        {
+          break;
+        }
+        case (ViscoplastUtils::EvaluationAction::continue_with_next_iteration):
+        {
+          local_newton_manager_.increment_iter();
+          continue;
+        }
+        case (ViscoplastUtils::EvaluationAction::exit_with_error):
+        {
+          return std::nullopt;
+        }
+        default:
+        {
+          FOUR_C_THROW("{}",
+              get_error_warning_info(std::format(
+                  "Invalid evaluation action {} for error status {} after residual evaluation",
+                  EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+        }
       }
     }
 
@@ -3928,8 +4156,8 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::local_newton_loop(
     }
 
     // evaluate Jacobian
-    jacMat = evaluate_local_newton_jacobian(
-        local_integration_input, local_newton_manager_.sol(), err_status);
+    jacMat = evaluate_local_newton_jacobian(local_integration_input, local_newton_manager_.sol(),
+        err_status, ViscoplastUtils::StateQuantityDerivEvalType::local_newton_jacobian);
 
     // error management after Jacobian evaluation
     eval_action = manage_evaluation(err_status, local_integration_input);
@@ -4000,6 +4228,37 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::local_newton_loop(
       }
     }
 
+    if (line_search_)
+    {
+      const std::optional<double> alpha = determine_line_search_step_length(
+          local_integration_input, residual, dx, reusable_residual);
+      if (!alpha)
+      {
+        err_status = ViscoplastUtils::ErrorType::no_convergence_local_newton;
+        eval_action = manage_evaluation(err_status, local_integration_input);
+        switch (eval_action)
+        {
+          case (ViscoplastUtils::EvaluationAction::continue_with_next_iteration):
+          {
+            local_newton_manager_.increment_iter();
+            continue;
+          }
+          case (ViscoplastUtils::EvaluationAction::exit_with_error):
+          {
+            return std::nullopt;
+          }
+          default:
+          {
+            FOUR_C_THROW(
+                "{}", get_error_warning_info(std::format(
+                          "Invalid evaluation action {} for error status {} after the line search",
+                          EnumTools::enum_name(eval_action), EnumTools::enum_name(err_status))));
+          }
+        }
+      }
+      dx.scale(*alpha);
+    }
+
     // update solution vector, iteration counter and  increment norm
     local_newton_manager_.increment_solution_vector(dx);
 
@@ -4047,7 +4306,7 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::verify_local_newton_exit
       {
         const bool residual_within_bounds =
             local_newton_manager_.convergence_quantities().residual_norm <
-            (local_newton_manager_.params().res_tol *
+            (local_newton_manager_.res_tol() *
                 local_newton_manager_.params().max_exceedance_fact_res_tol);
         const bool incr_ratio_within_bounds =
             local_newton_manager_.convergence_quantities().increment_norm <
@@ -4066,7 +4325,7 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::verify_local_newton_exit
                             "Residual {} exceeds the residual tolerance {} by more than the set "
                             "exceedance tolerance factor {}! Error status: {}",
                             local_newton_manager_.convergence_quantities().residual_norm,
-                            local_newton_manager_.params().res_tol,
+                            local_newton_manager_.res_tol(),
                             local_newton_manager_.params().max_exceedance_fact_res_tol,
                             EnumTools::enum_name(err_status))));
             }
@@ -4102,8 +4361,7 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplast::verify_local_newton_exit
                       "more than the set exceedance tolerance factors {} and {}! Error status: {}",
                       local_newton_manager_.convergence_quantities().residual_norm,
                       local_newton_manager_.convergence_quantities().increment_norm,
-                      local_newton_manager_.params().res_tol,
-                      local_newton_manager_.params().incr_tol,
+                      local_newton_manager_.res_tol(), local_newton_manager_.params().incr_tol,
                       local_newton_manager_.params().max_exceedance_fact_res_tol,
                       local_newton_manager_.params().max_exceedance_fact_incr_tol,
                       EnumTools::enum_name(err_status))));
@@ -4491,7 +4749,16 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::manage_evaluation(
 
       // "artificial reset" of the Local Newton--Raphson: the solution vector is set to the updated
       // estimate
-      local_newton_manager_.set_solution_vector(updated_estimate.value());
+      if (line_search_)
+      {
+        local_newton_manager_.save_init_estimate_and_reset_convergence_quantities(
+            updated_estimate.value());
+        line_search_->reset();
+      }
+      else
+      {
+        local_newton_manager_.set_solution_vector(updated_estimate.value());
+      }
 
       return ViscoplastUtils::EvaluationAction::continue_with_next_iteration;
     }
@@ -4983,10 +5250,9 @@ Mat::InelasticDefgradTransvIsotropElastViscoplast::verify_estimate_candidate(
           err_status, ViscoplastUtils::StateQuantityEvalType::full_eval);
   if (err_status != ViscoplastUtils::ErrorType::no_errors) return err_status;
 
-  // evaluate the candidate state linearization
   evaluate_state_quantity_derivatives(local_integration_input, iFin_candidate,
-      plastic_strain_candidate, err_status, ViscoplastUtils::StateQuantityDerivEvalType::full_eval,
-      eval_state_quantities);
+      plastic_strain_candidate, err_status,
+      ViscoplastUtils::StateQuantityDerivEvalType::local_newton_jacobian, eval_state_quantities);
 
   return err_status;
 }

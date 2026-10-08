@@ -23,6 +23,7 @@
 #include "4C_material_parameter_base.hpp"
 #include "4C_utils_enum.hpp"
 #include "4C_utils_exceptions.hpp"
+#include "4C_utils_linesearch.hpp"
 
 #include <boost/graph/visitors.hpp>
 #include <Teuchos_ParameterList.hpp>
@@ -42,6 +43,12 @@ namespace Discret::Utils
 
 namespace Mat
 {
+  namespace InelasticDefgradTransvIsotropElastViscoplastUtils
+  {
+    [[nodiscard]] Core::Utils::LineSearch::RecoveryPolicy<ErrorType> viscoplastic_error_recovery(
+        const LocalNewtonLineSearchRecoveryParams& recovery_params);
+  }  // namespace InelasticDefgradTransvIsotropElastViscoplastUtils
+
   namespace PAR
   {
     enum class InelasticSource;
@@ -1665,6 +1672,8 @@ namespace Mat
     //! map to elastic materials/potential summands (only transversely isotropic)
     std::vector<std::shared_ptr<Mat::Elastic::CoupTransverselyIsotropic>> potsumel_transviso_;
 
+    mutable std::optional<double> elastic_youngs_modulus_;
+
     //! viscoplastic law
     std::shared_ptr<Mat::Viscoplastic::Law> viscoplastic_law_;
 
@@ -1673,9 +1682,6 @@ namespace Mat
 
     //! fiber direction (director vector)
     Core::LinAlg::Matrix<3, 1> m_;
-
-    //! utilities for evaluating the matrix exponential and logarithm
-    InelasticDefgradTransvIsotropElastViscoplastUtils::MatrixExpLogUtils matrix_exp_log_utils_;
 
     //! boolean to control whether the history variables should be updated during evaluation
     bool update_hist_var_ = true;
@@ -1707,6 +1713,10 @@ namespace Mat
 
     //! dedicated Local Newton manager containing settings and iteration data
     InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager local_newton_manager_;
+
+    std::unique_ptr<Core::Utils::LineSearch::LineSearch<
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>>
+        line_search_;
 
     //! vector tracking whether there is plastic flow at each Gauss point
     std::vector<bool> is_plastic_gp_;
@@ -1810,7 +1820,10 @@ namespace Mat
         const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
             local_integration_input,
         const Core::LinAlg::Matrix<10, 1>& x,
-        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status);
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status,
+        InelasticDefgradTransvIsotropElastViscoplastUtils::StateQuantityDerivEvalType
+            deriv_eval_type = InelasticDefgradTransvIsotropElastViscoplastUtils::
+                StateQuantityDerivEvalType::full_eval);
 
     /*!
      * @brief Performs the viscoplastic corrector step of the constitutive update.
@@ -1841,6 +1854,31 @@ namespace Mat
     std::optional<Core::LinAlg::Matrix<10, 1>> local_newton_loop(
         const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
             local_integration_input);
+
+    std::optional<double> determine_line_search_step_length(
+        const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
+            local_integration_input,
+        const Core::LinAlg::Matrix<10, 1>& residual, const Core::LinAlg::Matrix<10, 1>& dx,
+        std::optional<Core::LinAlg::Matrix<10, 1>>& reusable_residual);
+
+    Core::Utils::LineSearch::MeritResult<
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>
+    evaluate_local_newton_merit(const double alpha, const Core::LinAlg::Matrix<10, 1>& current_sol,
+        const Core::LinAlg::Matrix<10, 1>& dx,
+        const InelasticDefgradTransvIsotropElastViscoplastUtils::LocalIntegrationInput&
+            local_integration_input,
+        Core::LinAlg::Matrix<10, 1>* residual_out = nullptr);
+
+    std::unique_ptr<Core::Utils::LineSearch::LineSearch<
+        InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType>>
+    build_line_search() const;
+
+    [[nodiscard]] bool use_rate_eliminated_and_inverse_flow_rule_residual() const
+    {
+      return parameter()->local_newton_params().use_rate_eliminated_and_inverse_flow_rule_residual;
+    }
+
+    [[nodiscard]] double elastic_youngs_modulus() const;
 
     /*!
      * @brief History variables computed by the constitutive update procedure.

@@ -2015,6 +2015,31 @@ void Solid::ModelEvaluator::Structure::params_interface2_parameter_list(
   params.set<double>("timintfac_dis", interface_ptr->get_tim_int_factor_disp());
   params.set<double>("timintfac_vel", interface_ptr->get_tim_int_factor_vel());
 
+  const auto global_residual_norms = interface_ptr->global_state().get_global_residual_norms();
+  double global_residual_norm_latest = -1.0;
+  double global_residual_norm_target = -1.0;
+  if (global_residual_norms)
+  {
+    const Solid::TimeInt::BaseDataSDyn& sdyn = tim_int().get_data_sdyn();
+    const double tolres = sdyn.get_res_tolerance(NOX::Nln::StatusTest::quantity_structure);
+    const Solid::ConvNorm tolres_type =
+        sdyn.get_res_tolerance_type(NOX::Nln::StatusTest::quantity_structure);
+    switch (tolres_type)
+    {
+      case Solid::convnorm_abs:
+        global_residual_norm_target = tolres;
+        break;
+      case Solid::convnorm_rel:
+        global_residual_norm_target = tolres * global_residual_norms->initial;
+        break;
+      default:
+        break;
+    }
+    global_residual_norm_latest = global_residual_norms->latest;
+  }
+  params.set<double>("global_residual_norm_latest", global_residual_norm_latest);
+  params.set<double>("global_residual_norm_target", global_residual_norm_target);
+
   Core::Elements::ActionType act = interface_ptr->get_action_type();
   std::string action;
   switch (act)

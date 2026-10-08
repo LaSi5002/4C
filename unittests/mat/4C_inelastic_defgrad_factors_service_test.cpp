@@ -439,6 +439,47 @@ namespace
     EXPECT_TRUE(manager_incr.is_local_newton_converged());
   }
 
+  TEST_F(InelasticDefgradFactorsServiceTest, TestLocalNewtonManagerResetAfterZeroIncrement)
+  {
+    Core::LinAlg::Matrix<10, 1> one_10x1{Core::LinAlg::Initialization::zero};
+    for (unsigned int i = 0; i < 10; ++i) one_10x1(i) = 1.0;
+    const Core::LinAlg::Matrix<10, 1> zero_10x1{Core::LinAlg::Initialization::zero};
+    Core::LinAlg::Matrix<10, 1> residual_over_tol{Core::LinAlg::Initialization::zero};
+    residual_over_tol(0) = 1.0e-7;
+
+    for (const auto conv_check : {ViscoplastUtils::LocalNewtonConvCheck::residual,
+             ViscoplastUtils::LocalNewtonConvCheck::increment_ratio,
+             ViscoplastUtils::LocalNewtonConvCheck::residual_and_increment_ratio})
+    {
+      auto manager = ViscoplastUtils::LocalNewtonManager({
+          .res_tol = 1.0e-8,
+          .incr_tol = 1.0e-10,
+          .conv_check = conv_check,
+          .diver_cont = ViscoplastUtils::LocalNewtonDiverCont::stop,
+          .max_iter = 100,
+          .max_exceedance_fact_res_tol = 0.0,
+          .max_exceedance_fact_incr_tol = 0.0,
+      });
+      manager.reset_iter();
+      manager.save_init_estimate_and_reset_convergence_quantities(one_10x1);
+      EXPECT_EQ(manager.convergence_quantities().increment_norm, 2.0e-10);
+
+      manager.increment_solution_vector(zero_10x1);
+      manager.increment_iter();
+      manager.set_residual_norm(residual_over_tol);
+      EXPECT_EQ(manager.convergence_quantities().increment_norm, 0.0);
+      EXPECT_EQ(manager.is_local_newton_stuck(),
+          conv_check != ViscoplastUtils::LocalNewtonConvCheck::increment_ratio);
+
+      manager.save_init_estimate_and_reset_convergence_quantities(one_10x1);
+      manager.increment_iter();
+      manager.set_residual_norm(residual_over_tol);
+      EXPECT_EQ(manager.convergence_quantities().increment_norm, 2.0e-10);
+      EXPECT_FALSE(manager.is_local_newton_stuck());
+      EXPECT_FALSE(manager.is_local_newton_converged());
+    }
+  }
+
   /// Tests the plastic predictor construction, and the interpolation procedures associated with it
   /// within the predictor interpolator used for the Adaptive Estimate Interpolation.
   /// Note that the test only covers the already implemented specifications for the preliminary

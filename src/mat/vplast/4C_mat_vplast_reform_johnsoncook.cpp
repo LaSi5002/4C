@@ -14,6 +14,7 @@
 #include "4C_mat_vplast_law.hpp"
 #include "4C_utils_exceptions.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -381,6 +382,59 @@ void Mat::Viscoplastic::ReformulatedJohnsonCook::unpack_viscoplastic_law(
   {
     extract_from_pack(buffer, time_step_quantities_.current_yield_strength_);
   }
+}
+
+/*--------------------------------------------------------------------*
+ *--------------------------------------------------------------------*/
+Mat::Viscoplastic::InverseFlowRuleResidual
+Mat::Viscoplastic::ReformulatedJohnsonCook::evaluate_inverse_flow_rule_residual(
+    const double equiv_stress, const double equiv_plastic_strain,
+    const double plastic_strain_increment, const double dt, const double youngs_modulus,
+    ViscoplastErrorType& err_status)
+{
+  err_status = ViscoplastErrorType::no_errors;
+
+  if (equiv_plastic_strain < 0.0)
+  {
+    err_status = ViscoplastErrorType::negative_plastic_strain;
+    return {};
+  }
+
+  if (plastic_strain_increment < 0.0)
+  {
+    err_status = ViscoplastErrorType::negative_plastic_strain;
+    return {};
+  }
+
+  const double p_dt = const_pars_.p * dt;
+  const double p_dt_plus_increment = p_dt + plastic_strain_increment;
+
+  ViscoplastErrorType yield_strength_err_status = ViscoplastErrorType::no_errors;
+  const double yield_strength =
+      compute_flow_resistance(equiv_stress, equiv_plastic_strain, yield_strength_err_status);
+  FOUR_C_ASSERT_ALWAYS(yield_strength_err_status == ViscoplastErrorType::no_errors,
+      "Computing the yield strength in the inverse flow rule has failed with error {}",
+      EnumTools::enum_name(yield_strength_err_status));
+
+  const double used_equiv_plastic_strain = std::max(equiv_plastic_strain, 1.0e-16);
+  const double dyield_strength_dplastic_strain =
+      const_pars_.is_perfect_plasticity
+          ? 0.0
+          : temperature_ratio_ * const_pars_.B * const_pars_.N *
+                std::pow(used_equiv_plastic_strain, const_pars_.N - 1.0);
+
+  const double inv_e = 1.0 / const_pars_.e;
+
+  const double scaling = const_pars_.sigma_Y0 / youngs_modulus;
+
+  return {
+      .value = scaling * (equiv_stress / yield_strength - 1.0 -
+                             inv_e * std::log1p(plastic_strain_increment / p_dt)),
+      .deriv_equiv_stress = scaling / yield_strength,
+      .deriv_plastic_strain = scaling * (-equiv_stress * dyield_strength_dplastic_strain /
+                                                (yield_strength * yield_strength) -
+                                            inv_e / p_dt_plus_increment),
+  };
 }
 
 FOUR_C_NAMESPACE_CLOSE

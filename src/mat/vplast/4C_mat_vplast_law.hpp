@@ -38,6 +38,13 @@ namespace Mat
 
     };
 
+    struct InverseFlowRuleResidual
+    {
+      double value{0.0};
+      double deriv_equiv_stress{0.0};
+      double deriv_plastic_strain{0.0};
+    };
+
     /*----------------------------------------------------------------------*/
     /*! \class Law
      * \brief Implementation of an interface called by the viscoplasticity finite strain model
@@ -170,6 +177,11 @@ namespace Mat
           const double equiv_plastic_strain, const double dt,
           Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status,
           const bool update_hist_var = true) = 0;
+
+      virtual InverseFlowRuleResidual evaluate_inverse_flow_rule_residual(const double equiv_stress,
+          const double equiv_plastic_strain, const double plastic_strain_increment, const double dt,
+          const double youngs_modulus,
+          Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::ErrorType& err_status) = 0;
 
       /// Return material parameters
       [[nodiscard]] virtual Core::Mat::PAR::Parameter* parameter() const { return params_; }

@@ -23,6 +23,7 @@
 #include "4C_utils_exceptions.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <string>
 #include <tuple>
@@ -582,7 +583,7 @@ Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::compute_taylor_quinney_w
  *--------------------------------------------------------------------*/
 Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager::LocalNewtonManager(
     const LocalNewtonParams& lnl_params)
-    : params_(lnl_params)
+    : params_(lnl_params), res_tol_(lnl_params.res_tol)
 {
   // set number of Gauss points to 1 temporarily, since we don't
   // know it at this point in time
@@ -660,19 +661,52 @@ void Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager:
   if (params_.conv_check == LocalNewtonConvCheck::residual ||
       params_.conv_check == LocalNewtonConvCheck::residual_and_increment_ratio)
   {
-    convergence_quantities_.residual_norm = 2.0 * params_.res_tol;
+    convergence_quantities_.residual_norm = 2.0 * res_tol_;
   }
 
   // increment norm: ratio of increment to current solution
-  convergence_quantities_.increment_norm = 0.0;
   // if the convergence check requires verifying the increment norm, we must ensure that the value
   // set here is larger than the tolerance, to perform the check at least once, in the next
   // iteration
-  if (params_.conv_check == LocalNewtonConvCheck::increment_ratio ||
-      params_.conv_check == LocalNewtonConvCheck::residual_and_increment_ratio)
+  convergence_quantities_.increment_norm = 2.0 * params_.incr_tol;
+}
+
+/*--------------------------------------------------------------------*
+ *--------------------------------------------------------------------*/
+void Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager::adapt_res_tol(
+    const double global_residual_norm_latest, const double global_residual_norm_target)
+{
+  const LocalNewtonAdaptiveTolParams& adaptive_tol = params_.adaptive_tol;
+  switch (adaptive_tol.type)
   {
-    convergence_quantities_.increment_norm = 2.0 * params_.incr_tol;
+    case LocalNewtonAdaptiveTolType::none:
+    {
+      res_tol_ = params_.res_tol;
+      return;
+    }
+    case LocalNewtonAdaptiveTolType::global_residual_forcing:
+    {
+      if (global_residual_norm_latest < 0.0)
+      {
+        res_tol_ = std::max(params_.res_tol, adaptive_tol.tol_max);
+        return;
+      }
+      if (global_residual_norm_target <= 0.0)
+      {
+        res_tol_ = params_.res_tol;
+        return;
+      }
+      const double global_residual_ratio =
+          global_residual_norm_latest / global_residual_norm_target;
+      res_tol_ = std::max(
+          params_.res_tol, std::min(adaptive_tol.tol_max,
+                               adaptive_tol.safety * params_.res_tol *
+                                   std::pow(global_residual_ratio, adaptive_tol.exponent)));
+      return;
+    }
   }
+  FOUR_C_THROW(
+      "Unknown adaptive Local Newton tolerance type {}", EnumTools::enum_name(adaptive_tol.type));
 }
 
 /*--------------------------------------------------------------------*
@@ -708,14 +742,14 @@ bool Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager:
   switch (params_.conv_check)
   {
     case InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonConvCheck::residual:
-      return (convergence_quantities_.residual_norm <= params_.res_tol);
+      return (convergence_quantities_.residual_norm <= res_tol_);
       break;
     case InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonConvCheck::increment_ratio:
       return (convergence_quantities_.increment_norm <= params_.incr_tol);
       break;
     case InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonConvCheck::
         residual_and_increment_ratio:
-      return (convergence_quantities_.residual_norm <= params_.res_tol &&
+      return (convergence_quantities_.residual_norm <= res_tol_ &&
               convergence_quantities_.increment_norm <= params_.incr_tol);
       break;
     default:
@@ -739,7 +773,7 @@ bool Mat::InelasticDefgradTransvIsotropElastViscoplastUtils::LocalNewtonManager:
       case LocalNewtonConvCheck::residual:
       case LocalNewtonConvCheck::residual_and_increment_ratio:
       {
-        return (convergence_quantities_.residual_norm > params_.res_tol);
+        return (convergence_quantities_.residual_norm > res_tol_);
       }
       case LocalNewtonConvCheck::increment_ratio:
       {
