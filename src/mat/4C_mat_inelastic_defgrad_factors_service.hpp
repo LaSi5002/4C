@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -517,6 +518,9 @@ namespace Mat
       //! plastic velocity gradient tensor
       Core::LinAlg::Matrix<3, 3> curr_lpM{Core::LinAlg::Initialization::zero};
 
+      //! direction of velocity gradient tensor. Always has det 1.
+      Core::LinAlg::Matrix<3, 3> curr_lp_directionM{Core::LinAlg::Initialization::zero};
+
       //! plastic update tensor
       Core::LinAlg::Matrix<3, 3> curr_EpM{Core::LinAlg::Initialization::zero};
 
@@ -537,6 +541,7 @@ namespace Mat
                                         ///< evaluated
       equiv_stress_derivs_only,  ///< return in evaluate_state_quantities once the derivatives of
                                  ///< the equivalent stress has been evaluated
+      local_newton_jacobian,
     };
 
 
@@ -605,6 +610,9 @@ namespace Mat
       //! derivative of the plastic velocity gradient tensor w.r.t. the temperature
       //! (Voigt notation)
       Core::LinAlg::Matrix<9, 1> curr_dlpdT{Core::LinAlg::Initialization::zero};
+
+      Core::LinAlg::Matrix<9, 9> curr_dlp_direction_diFin{Core::LinAlg::Initialization::zero};
+      Core::LinAlg::Matrix<9, 6> curr_dlp_direction_dC{Core::LinAlg::Initialization::zero};
 
       //! derivative of the plastic update tensor w.r.t. the inverse inelastic deformation
       //! gradient (Voigt notation)
@@ -881,6 +889,10 @@ namespace Mat
       //! employing the divergence management strategy for continuation with
       //! safeguard)
       double max_exceedance_fact_incr_tol;
+
+      bool use_reformulated_residual{false};
+
+      std::optional<double> scaling_youngs_modulus{};
     };
 
     //! class for managing the Local Newton loop, containing the utilized parameters and iteration
